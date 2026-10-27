@@ -74,7 +74,11 @@ class StorefrontViewModel(
             // Day-0 preview catalog until shop owner signs in once to seed/publish cloud products
             DemoCatalog.buildSeedEntries().map { it.product.copy(id = it.id) }
         }
-        UiState.Success(displayList.sortedByDescending { it.createdAtMillis }) as UiState<List<Product>>
+        val sorted = displayList.sortedWith(
+            compareBy<Product> { it.isDemo }
+                .thenByDescending { maxOf(it.updatedAtMillis, it.createdAtMillis) }
+        )
+        UiState.Success(sorted) as UiState<List<Product>>
     }
         .catch { e ->
             Log.w(TAG, "Error observing published products, showing starter catalog", e)

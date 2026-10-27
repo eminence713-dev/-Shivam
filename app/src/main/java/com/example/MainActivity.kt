@@ -560,6 +560,7 @@ private fun ShivamMartStoreShell(
                                 adminViewModel = adminVm,
                                 storeSettings = settings,
                                 lang = lang,
+                                signedInOwnerEmail = user?.email.orEmpty(),
                                 onExitToStorefront = { activeTab = PrimaryTab.HOME },
                                 onLockOwner = {
                                     isOwnerUnlocked = false
@@ -706,8 +707,14 @@ private fun OwnerAccessDialog(
                                 val res = AuthManager.signInInteractiveWithGoogle(context)
                                 isSigningInOwner = false
                                 res.onFailure { err ->
-                                    if (err !is GetCredentialCancellationException) {
-                                        errorMessage = if (lang == AppLanguage.HINDI) {
+                                    errorMessage = if (err is GetCredentialCancellationException) {
+                                        if (lang == AppLanguage.HINDI) {
+                                            "Google अकाउंट चयन रद्द हो गया। कृपया अपना मालिक Gmail अकाउंट चुनें।"
+                                        } else {
+                                            "Google account selection was dismissed. Please select your Owner Gmail account."
+                                        }
+                                    } else {
+                                        if (lang == AppLanguage.HINDI) {
                                             "Google अकाउंट जुड़ नहीं सका। कृपया फोन में इंटरनेट और Gmail अकाउंट जांचें।"
                                         } else {
                                             "Could not sign in with Google. Please verify internet and Google account on device."

@@ -39,7 +39,10 @@ object AuthManager {
     }
 
     private fun resolveWebClientId(context: Context): String? {
-        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        val primaryId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        val resId = if (primaryId != 0) primaryId else {
+            context.resources.getIdentifier("default_web_client_id", "string", "com.example")
+        }
         if (resId == 0) return null
         return context.getString(resId).takeIf { it.isNotBlank() }
     }

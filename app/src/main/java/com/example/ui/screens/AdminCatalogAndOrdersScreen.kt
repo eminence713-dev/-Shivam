@@ -616,7 +616,11 @@ fun AdminProductsSection(
     }
 
     if (isCreatingNew || editingProduct != null) {
-        val initial = editingProduct ?: Product()
+        val initial = editingProduct ?: Product(
+            stockCount = 10L,
+            isPublished = true,
+            isFeatured = true
+        )
         val initialCost = editingProduct?.let { productCosts[it.id]?.costPriceInr } ?: 0L
         val initialNote = editingProduct?.let { productCosts[it.id]?.supplierNote }.orEmpty()
         ProductEditorDialog(
@@ -746,7 +750,7 @@ private fun ProductEditorDialog(
                 }
 
                 Text(
-                    text = "Storage note: Selected photos are compressed (~140 KB JPEG) and saved directly in local app storage immediately.",
+                    text = "Photo sync: Selected photos are compressed (~140 KB JPEG) for fast live loading across all customer phones.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -885,16 +889,17 @@ private fun ProductEditorDialog(
                         enabled = !isBusy,
                         onClick = {
                             val sell = sellingPrice.toLongOrNull() ?: 0L
-                            if (nameEn.trim().isEmpty()) {
-                                formError = "Product English name is required."
+                            val finalNameEn = nameEn.trim().ifEmpty { nameHi.trim() }
+                            if (finalNameEn.isEmpty()) {
+                                formError = "कृपया उत्पाद का नाम लिखें (Please enter product name)."
                                 return@Button
                             }
                             if (sell <= 0L) {
-                                formError = "Enter a valid selling price in INR (> ₹0)."
+                                formError = "कृपया सही बिक्री मूल्य लिखें (Enter selling price > ₹0)."
                                 return@Button
                             }
                             val prod = initialProduct.copy(
-                                nameEn = nameEn.trim(),
+                                nameEn = finalNameEn,
                                 nameHi = nameHi.trim(),
                                 category = category.name,
                                 descriptionEn = descEn.trim(),

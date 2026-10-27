@@ -58,6 +58,9 @@ class AdminViewModel(
     private val langPrefs: LanguagePreferencesRepository
 ) : ViewModel() {
 
+    val isCloudConfigured: Boolean
+        get() = repository.isCloudConfigured
+
     val allProductsState: StateFlow<UiState<List<Product>>> = repository.observeAllProductsForOwner()
         .map<List<Product>, UiState<List<Product>>> { list ->
             UiState.Success(list.sortedByDescending { it.updatedAtMillis })
@@ -154,7 +157,11 @@ class AdminViewModel(
             _isBusy.value = false
             res.fold(
                 onSuccess = {
-                    _statusBanner.value = "Product saved successfully."
+                    _statusBanner.value = if (repository.isCloudConfigured) {
+                        "✅ लाइव पब्लिश हो गया! नया सामान अब सभी ग्राहकों के फोन में तुरंत दिख रहा है। (Published live to all customer phones!)"
+                    } else {
+                        "⚠️ ऑफलाइन APK मोड: यह सामान सिर्फ इसी फोन में सेव हुआ है, ग्राहक के फोन में नहीं दिखेगा! (क्लाउड APK इंस्टॉल करें)"
+                    }
                     onSaved()
                 },
                 onFailure = { e -> _statusBanner.value = e.localizedMessage ?: "Failed to save product." }

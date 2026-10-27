@@ -19,6 +19,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -70,6 +72,7 @@ fun AdminDashboardHub(
     adminViewModel: AdminViewModel,
     storeSettings: StoreSettings,
     lang: AppLanguage,
+    signedInOwnerEmail: String = "",
     onExitToStorefront: () -> Unit,
     onLockOwner: () -> Unit
 ) {
@@ -162,6 +165,57 @@ fun AdminDashboardHub(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
+            }
+        }
+
+        // Cloud Sync vs Offline APK Mode Banner (eliminates any silent LocalFallbackStore confusion)
+        Surface(
+            color = if (adminViewModel.isCloudConfigured) {
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+            } else {
+                MaterialTheme.colorScheme.errorContainer
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_cloud_sync_status_banner")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    imageVector = if (adminViewModel.isCloudConfigured) Icons.Filled.CloudDone else Icons.Filled.CloudOff,
+                    contentDescription = null,
+                    tint = if (adminViewModel.isCloudConfigured) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    }
+                )
+                Text(
+                    text = if (adminViewModel.isCloudConfigured) {
+                        val acctLabel = signedInOwnerEmail.ifBlank { "Cloud Connected" }
+                        if (lang == AppLanguage.HINDI) {
+                            "लाइव क्लाउड सिंक चालू है ($acctLabel) — यहाँ जोड़ा गया हर सामान सभी ग्राहकों के फोन में तुरंत लाइव दिखेगा!"
+                        } else {
+                            "Live Cloud Sync Active ($acctLabel) — Products added here appear instantly on all customer phones!"
+                        }
+                    } else {
+                        if (lang == AppLanguage.HINDI) {
+                            "⚠️ ऑफलाइन APK मोड (क्लाउड कनेक्ट नहीं है): यह APK GitHub पर बिना Firebase कनेक्शन के बना है, इसलिए नया सामान सिर्फ इसी फोन में सेव हो रहा है (ग्राहक के फोन में नहीं दिखेगा)। लाइव सिंक वाले APK के लिए AI Studio में ऊपर Settings (⚙️) → Download APK दबाएं!"
+                        } else {
+                            "⚠️ Offline APK Mode (No Cloud Connection): This APK was built without Firebase config, so products save ONLY on this phone. For live customer sync, use AI Studio Settings (⚙️) → Download APK (or add GOOGLE_SERVICES_JSON in GitHub Secrets)!"
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (adminViewModel.isCloudConfigured) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
