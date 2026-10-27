@@ -673,30 +673,6 @@ fun ProductDetailScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (product.isDemo) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(10.dp)
-                    ) {
-                        Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (lang == AppLanguage.HINDI) {
-                                "यह परीक्षण हेतु डेमो सैंपल उत्पाद है। वास्तविक दुकान स्टॉक की पुष्टि व्हाट्सऐप पर करें।"
-                            } else {
-                                "This is a clearly labelled demonstration sample item for testing."
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-
             Text(
                 text = product.displayName(lang),
                 style = MaterialTheme.typography.headlineSmall

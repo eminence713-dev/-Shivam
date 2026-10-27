@@ -86,7 +86,7 @@ fun CartAndCheckoutTab(
     cartItems: List<CartItem>,
     latestProducts: List<Product>,
     settings: StoreSettings,
-    defaultCustomerName: String,
+    defaultCustomerName: String = "",
     isPlacingOrder: Boolean,
     checkoutError: String?,
     lang: AppLanguage,
@@ -568,6 +568,31 @@ fun OrderConfirmationCard(
                     }
                 }
 
+                Button(
+                    onClick = {
+                        val msg = WhatsAppHelper.buildSavedOrderWhatsAppMessage(order, settings, lang)
+                        WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = WhatsAppGreen,
+                        contentColor = androidx.compose.ui.graphics.Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("confirm_send_whatsapp_button")
+                ) {
+                    Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (lang == AppLanguage.HINDI) {
+                            "व्हाट्सऐप पर दुकानदार को ऑर्डर भेजें (${settings.whatsappNumber})"
+                        } else {
+                            "Send Full Order on WhatsApp (${settings.whatsappNumber})"
+                        }
+                    )
+                }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = {
@@ -583,26 +608,13 @@ fun OrderConfirmationCard(
                         Spacer(Modifier.width(6.dp))
                         Text(AppStrings.printBill.get(lang))
                     }
-                    OutlinedButton(
-                        onClick = {
-                            val msg = "Hello ${settings.storeNameEn}, I placed saved online Order Ref: ${order.orderReference} (${formatInr(order.totalPayableInr)}). Please confirm delivery timing."
-                            WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
-                        },
-                        border = BorderStroke(1.dp, WhatsAppGreen),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = WhatsAppGreen),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("WhatsApp Update")
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = onViewMyOrders, modifier = Modifier.weight(1f)) {
                         Text(AppStrings.navOrders.get(lang))
                     }
-                    Button(onClick = onContinueShopping, modifier = Modifier.weight(1f)) {
-                        Text(AppStrings.shopNow.get(lang))
-                    }
+                }
+
+                Button(onClick = onContinueShopping, modifier = Modifier.fillMaxWidth()) {
+                    Text(AppStrings.shopNow.get(lang))
                 }
             }
         }
@@ -620,12 +632,12 @@ fun CustomerOrdersTab(
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = if (lang == AppLanguage.HINDI) "मेरे सुरक्षित ऑर्डर और ट्रैकिंग" else "My Orders & Safe Status Tracking",
+            text = if (lang == AppLanguage.HINDI) "मेरे ऑर्डर और बिल (My Orders)" else "My Orders & Printable Bills",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            text = if (lang == AppLanguage.HINDI) "केवल आपके Google खाते से किए गए निजी ऑर्डर यहाँ दिखाई देते हैं।" else "Strictly isolated to your signed-in account — other customers' orders are never exposed.",
+            text = if (lang == AppLanguage.HINDI) "इस फ़ोन से किए गए आपके सभी ऑर्डर और बिल यहाँ सुरक्षित रहते हैं।" else "All orders placed on this phone and their printable bills are saved here.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -659,7 +671,7 @@ fun CustomerOrdersTab(
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                         items(list, key = { it.id }) { order ->
                             val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
-                                .format(order.createdAt?.toDate() ?: Date())
+                                .format(order.createdAtDate())
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
@@ -711,11 +723,11 @@ fun CustomerOrdersTab(
                                         }
                                         OutlinedButton(
                                             onClick = {
-                                                val msg = "Hello, checking status for Order Ref: ${order.orderReference}."
+                                                val msg = WhatsAppHelper.buildSavedOrderWhatsAppMessage(order, settings, lang)
                                                 WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
                                             }
                                         ) {
-                                            Text("WhatsApp Help")
+                                            Text(if (lang == AppLanguage.HINDI) "व्हाट्सऐप पर भेजें" else "Send on WhatsApp")
                                         }
                                     }
                                 }

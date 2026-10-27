@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.example.data.model.AppLanguage
 import com.example.data.model.CartItem
+import com.example.data.model.CustomerOrder
 import com.example.data.model.Product
 import com.example.data.model.StoreSettings
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,42 @@ object WhatsAppHelper {
             digits.length >= 10 -> "91${digits.takeLast(10)}"
             else -> "919162685162"
         }
+    }
+
+    fun buildSavedOrderWhatsAppMessage(
+        order: CustomerOrder,
+        settings: StoreSettings,
+        lang: AppLanguage
+    ): String {
+        return buildString {
+            appendLine("🛍️ *नया ग्राहक ऑर्डर — ${settings.storeNameEn}*")
+            appendLine("📋 *Order Ref:* ${order.orderReference}")
+            appendLine("👤 *नाम (Customer):* ${order.customerName}")
+            appendLine("📞 *मोबाइल:* ${order.customerPhone}")
+            appendLine("📍 *पता (Address):* ${order.deliveryAddress}")
+            if (order.landmark.isNotBlank()) {
+                appendLine("🧭 *लैंडमार्क:* ${order.landmark}")
+            }
+            appendLine("────────────────")
+            order.parsedItems().forEachIndexed { idx, item ->
+                val opts = listOf(item.selectedSize, item.selectedColor)
+                    .filter { it.isNotBlank() }
+                    .joinToString(", ")
+                append("${idx + 1}. ${item.productName} × ${item.quantity}")
+                if (opts.isNotBlank()) append(" [$opts]")
+                appendLine(" = ${formatInr(item.lineTotalInr)}")
+            }
+            appendLine("────────────────")
+            appendLine("💰 *कुल राशि (Total):* ${formatInr(order.totalPayableInr)}")
+            appendLine("💳 *भुगतान (Payment):* ${order.paymentMethodEnum().label(lang)}")
+            appendLine()
+            appendLine(
+                if (lang == AppLanguage.HINDI)
+                    "कृपया मेरा ऑर्डर कन्फर्म करें और डिलीवरी का समय बताएँ। धन्यवाद!"
+                else
+                    "Please confirm my order and let me know the delivery timing. Thank you!"
+            )
+        }.trim()
     }
 
     fun buildCartEnquiryMessage(

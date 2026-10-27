@@ -8,6 +8,8 @@
     <string name="cd_language_switch">Switch language between English and Hindi</string>
     <string name="cd_shopping_cart">Open shopping cart</string>
     <string name="cd_whatsapp_contact">Contact shop on WhatsApp</string>
-    <string name="cd_owner_dashboard">Open Owner Admin Dashboard</string>
-    <string name="btn_sign_in_google">Sign in with Google</string>
+    <string name="cd_owner_dashboard">Open password-protected Owner Dashboard</string>
+    <string name="cd_lock_owner_dashboard">Lock Owner Dashboard</string>
+    <string name="owner_password_dialog_title_en">Owner Panel Access</string>
+    <string name="owner_password_dialog_title_hi">मालिक पैनल पासवर्ड</string>
 </resources>

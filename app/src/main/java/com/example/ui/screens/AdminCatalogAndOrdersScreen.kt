@@ -485,7 +485,7 @@ fun AdminProductsSection(
             Spacer(Modifier.height(8.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                 items(movements, key = { it.id }) { mov ->
-                    val dt = SimpleDateFormat("dd MMM, hh:mm a", Locale.US).format(mov.createdAt?.toDate() ?: Date())
+                    val dt = SimpleDateFormat("dd MMM, hh:mm a", Locale.US).format(mov.createdAtDate())
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -697,7 +697,7 @@ private fun ProductEditorDialog(
 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            photoStatus = "Compressing photo for cloud sync..."
+            photoStatus = "Compressing photo..."
             scope.launch {
                 ImageCompressor.compressUriToBase64(context, uri).fold(
                     onSuccess = { b64 ->
@@ -746,7 +746,7 @@ private fun ProductEditorDialog(
                 }
 
                 Text(
-                    text = "Storage note: Selected photos are compressed (~140 KB JPEG) and stored directly in Firestore so uploads work immediately without extra cloud bucket setup.",
+                    text = "Storage note: Selected photos are compressed (~140 KB JPEG) and saved directly in local app storage immediately.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -963,7 +963,7 @@ fun AdminOrdersSection(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                 items(visible, key = { it.id }) { order ->
-                    val dt = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(order.createdAt?.toDate() ?: Date())
+                    val dt = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(order.createdAtDate())
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)

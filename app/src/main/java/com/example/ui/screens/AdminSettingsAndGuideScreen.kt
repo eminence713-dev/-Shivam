@@ -19,7 +19,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,10 +43,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.data.model.AppLanguage
 import com.example.data.model.CustomerOrder
 import com.example.data.model.Expense
@@ -64,7 +70,8 @@ fun AdminDashboardHub(
     adminViewModel: AdminViewModel,
     storeSettings: StoreSettings,
     lang: AppLanguage,
-    onExitToStorefront: () -> Unit
+    onExitToStorefront: () -> Unit,
+    onLockOwner: () -> Unit
 ) {
     var currentSection by rememberSaveable { mutableStateOf(AdminSection.OVERVIEW) }
     var selectedRange by rememberSaveable { mutableStateOf(ReportDateRange.TODAY) }
@@ -129,7 +136,7 @@ fun AdminDashboardHub(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Owner-Verified Admin Access • Raju Kumar Gupta",
+                        text = if (lang == AppLanguage.HINDI) "मालिक पैनल (पासवर्ड सुरक्षित)" else "Password-Protected Owner Access • Raju Kumar Gupta",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
@@ -137,7 +144,7 @@ fun AdminDashboardHub(
                 androidx.compose.material3.FilledTonalButton(
                     onClick = onExitToStorefront,
                     modifier = Modifier
-                        .padding(end = 6.dp)
+                        .padding(end = 4.dp)
                         .testTag("admin_preview_shop_button")
                 ) {
                     Text(
@@ -145,7 +152,16 @@ fun AdminDashboardHub(
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
-                Icon(Icons.Filled.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
+                IconButton(
+                    onClick = onLockOwner,
+                    modifier = Modifier.testTag("admin_lock_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = stringResource(R.string.cd_lock_owner_dashboard),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
@@ -235,8 +251,12 @@ fun AdminDashboardHub(
             )
             AdminSection.SETTINGS -> AdminStoreSettingsSection(
                 settings = storeSettings,
+                lang = lang,
                 isBusy = isBusy,
-                onSave = { adminViewModel.saveSettings(it) }
+                onSave = { adminViewModel.saveSettings(it) },
+                onChangeOwnerPassword = { currentPwd, newPwd, onDone ->
+                    adminViewModel.changeOwnerPassword(currentPwd, newPwd, onDone)
+                }
             )
             AdminSection.SETUP_GUIDE -> AdminSetupAndGuideSection()
         }
@@ -246,8 +266,10 @@ fun AdminDashboardHub(
 @Composable
 fun AdminStoreSettingsSection(
     settings: StoreSettings,
+    lang: AppLanguage,
     isBusy: Boolean,
-    onSave: (StoreSettings) -> Unit
+    onSave: (StoreSettings) -> Unit,
+    onChangeOwnerPassword: (String, String, () -> Unit) -> Unit
 ) {
     var phone by remember(settings) { mutableStateOf(settings.phone) }
     var whatsapp by remember(settings) { mutableStateOf(settings.whatsappNumber) }
@@ -400,30 +422,95 @@ fun AdminStoreSettingsSection(
             enabled = !isBusy,
             modifier = Modifier.fillMaxWidth().height(50.dp).testTag("save_settings_button")
         ) {
-            Text("Save Store Settings")
+            Text(if (lang == AppLanguage.HINDI) "स्टोर सेटिंग्स सेव करें" else "Save Store Settings")
         }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        // Owner Password Management Card
+        var currentPwd by remember { mutableStateOf("") }
+        var newPwd by remember { mutableStateOf("") }
+        var showPwd by remember { mutableStateOf(false) }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            border = BorderStroke(1.dp, AntiqueGold),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = if (lang == AppLanguage.HINDI) "मालिक पासवर्ड बदलें (Owner Password)" else "Change Owner Dashboard Password",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = if (lang == AppLanguage.HINDI) {
+                        "ग्राहकों के लिए ऐप बिना किसी लॉगिन के सीधे खुलता है। केवल यह मालिक पैनल आपके गुप्त पासवर्ड से सुरक्षित रहता है।"
+                    } else {
+                        "Customers open the shop directly without any login. Only this Owner Dashboard is protected by your secret password."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = currentPwd,
+                    onValueChange = { currentPwd = it },
+                    label = { Text(if (lang == AppLanguage.HINDI) "पुराना पासवर्ड" else "Current Password") },
+                    singleLine = true,
+                    visualTransformation = if (showPwd) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showPwd = !showPwd }) {
+                            Icon(
+                                imageVector = if (showPwd) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (showPwd) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("settings_current_password_input")
+                )
+                OutlinedTextField(
+                    value = newPwd,
+                    onValueChange = { newPwd = it },
+                    label = { Text(if (lang == AppLanguage.HINDI) "नया पासवर्ड (कम से कम 4 अक्षर)" else "New Password (min 4 characters)") },
+                    singleLine = true,
+                    visualTransformation = if (showPwd) VisualTransformation.None else PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().testTag("settings_new_password_input")
+                )
+                Button(
+                    onClick = {
+                        onChangeOwnerPassword(currentPwd, newPwd) {
+                            currentPwd = ""
+                            newPwd = ""
+                        }
+                    },
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth().testTag("change_owner_password_button")
+                ) {
+                    Text(if (lang == AppLanguage.HINDI) "नया पासवर्ड सेव करें" else "Update Owner Password")
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
 fun AdminSetupAndGuideSection() {
     val sections = listOf(
-        "1. Platform Note: Installable Android App (.apk / .aab)" to
-            "This project is built on Google AI Studio's native Android (Kotlin + Jetpack Compose) runtime rather than a browser service-worker PWA. You can generate an installable Android APK/AAB directly from the AI Studio Settings menu to install on Raju Kumar Gupta's phone and share with Kalyanpur customers, or publish to Google Play. If you also want a public browser website on a custom domain later, connect a web frontend to this same Firebase Firestore database.",
-        "2. Owner Admin Access & Google Security" to
-            "Admin privileges are strictly locked in Cloud Firestore Security Rules to verified Google Sign-In for rajuguptas123@gmail.com (and authorized setup account). Keep 2-Step Verification turned ON on your Google account and never share your phone lock PIN.",
-        "3. Replacing Demo Products with Real Shop Photos" to
-            "1) Open Owner Dashboard -> Hide All Demo Items.\n2) Tap Products & Stock -> Add Product.\n3) Tap 'Pick Shop Photo from Phone' to select photos of your real sarees, kurtis, shirts, and shoes. Photos are compressed (~140 KB) and stored in Cloud Firestore immediately. For large multi-photo galleries later, you can paste HTTPS image URLs from Firebase Storage or Cloudinary.",
-        "4. Safe UPI QR Setup & Payment Verification" to
-            "1) Open Store Settings & UPI.\n2) Enter your bank/PhonePe/Paytm Business Merchant UPI ID (e.g., merchant@upi) and Payee Name.\n3) Scan the ₹1 test QR with another phone to verify your shop name appears.\n4) IMPORTANT: Screenshots can be faked! Every UPI order starts as 'Pending Verification'—only mark 'Verified Paid' after checking your own UPI Business app or bank SMS.",
-        "5. Confirming Delivery Charges & Return Policy" to
-            "Until confirmed, checkout shows 'Awaiting owner confirmation'. Once you decide Kalyanpur delivery charges (e.g., ₹0 in Bada Bazar, ₹30 nearby villages), open Store Settings -> switch ON 'Confirm Delivery & Return Policies Live' and save.",
+        "1. Direct Shop Open for Customers (Zero Login Hassle)" to
+            "When customers open the app, it goes directly into Shri Shivam Readymade & Riya Fancy Shoes Mart with zero login or Google account popups. Customers can browse all 10 categories, add to cart, place orders, and send itemized orders directly to your WhatsApp (9162685162).",
+        "2. Password-Protected Owner Dashboard" to
+            "Only the Owner Dashboard (Lock icon at top-right) requires your Owner Password. You can change your password anytime inside Store Settings -> Change Owner Dashboard Password, and tap the Lock icon in the Owner Dashboard header to lock it back when done.",
+        "3. Free APK Distribution via GitHub / WhatsApp (₹0 Cost)" to
+            "Your GitHub repository automatically compiles 'Shivam-Riya-Mart.apk' under GitHub Releases (latest-apk). Paste that download link in Owner Dashboard -> Free Customer Sharing to create a Counter QR code and 1-tap WhatsApp invite message.",
+        "4. Adding Real Shop Photos & Stock" to
+            "1) Open Owner Dashboard -> Hide All Demo Items.\n2) Tap Products & Stock -> Add Product.\n3) Tap 'Pick Shop Photo from Phone' to select photos of your sarees, kurtis, shirts, and shoes.",
+        "5. Safe UPI QR Setup & Payment Verification" to
+            "1) Open Store Settings & UPI.\n2) Enter your Merchant UPI ID (e.g., merchant@upi) and Payee Name.\n3) Scan the ₹1 test QR with another phone to verify your shop name appears.\n4) Always verify payment in your bank/UPI Business app before marking 'Verified Paid'.",
         "6. Online Orders vs Walk-in Counter Sales" to
-            "Online customer orders appear in 'Online Orders' with an SSR-... reference. Walk-in shop customers should be billed in 'Counter Sale & Bill' (POS-... invoice). Both deduct product stock automatically without double-counting revenue.",
-        "7. Honest Profit Calculation" to
-            "Enter your private wholesale purchase cost ('Purchase Cost ₹') when adding each product. Customers can NEVER read '/product_costs'. Reports calculate Gross Margin strictly on items with recorded purchase cost.",
-        "8. Regular CSV Backup & APK Distribution" to
-            "Open 'Sales & Profit Reports' -> tap 'Export CSV' weekly to save a copy of your products, online orders, and counter bills to Google Drive or WhatsApp. Export your signed APK/AAB via AI Studio -> Settings -> Export."
+            "Customer orders placed in the app generate an SSR-... reference and printable bill, plus a 1-tap WhatsApp order message to your number. Walk-in shop customers can be billed in 'Counter Sale & Bill' (POS-... invoice)."
     )
 
     Column(
@@ -434,7 +521,7 @@ fun AdminSetupAndGuideSection() {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Owner Operations, Security & Deployment Guide",
+            text = "Owner Operations, Password Security & Free Sharing Guide",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.primary
         )

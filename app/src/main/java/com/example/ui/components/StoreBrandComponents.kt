@@ -23,8 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -117,10 +117,10 @@ fun StoreTopBar(
     storeNameHi: String,
     lang: AppLanguage,
     cartCount: Int,
+    isOwnerUnlocked: Boolean,
     onToggleLanguage: () -> Unit,
     onOpenCart: () -> Unit,
-    onSignOut: () -> Unit,
-    onOwnerAccessCheck: (() -> Unit)? = null
+    onOwnerClick: () -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.primary,
@@ -167,7 +167,7 @@ fun StoreTopBar(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = if (lang == AppLanguage.ENGLISH) "हिंदी" else "EN",
+                    text = if (lang == AppLanguage.HINDI) "EN" else "हिंदी",
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -194,26 +194,14 @@ fun StoreTopBar(
                     )
                 }
             }
-            if (onOwnerAccessCheck != null) {
-                IconButton(
-                    onClick = onOwnerAccessCheck,
-                    modifier = Modifier.testTag("owner_access_info_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.AdminPanelSettings,
-                        contentDescription = if (lang == AppLanguage.HINDI) "मालिक डैशबोर्ड एक्सेस जानकारी" else "Owner Dashboard Access Info",
-                        tint = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                }
-            }
             IconButton(
-                onClick = onSignOut,
-                modifier = Modifier.testTag("sign_out_button")
+                onClick = onOwnerClick,
+                modifier = Modifier.testTag("owner_access_button")
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.Logout,
-                    contentDescription = "Sign out",
-                    tint = MaterialTheme.colorScheme.onPrimary
+                    imageVector = if (isOwnerUnlocked) Icons.Outlined.AdminPanelSettings else Icons.Outlined.Lock,
+                    contentDescription = stringResource(R.string.cd_owner_dashboard),
+                    tint = if (isOwnerUnlocked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
                 )
             }
         }
@@ -272,23 +260,6 @@ fun ProductVisualImage(
                     contentDescription = product.displayName(lang),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-
-        // Demo Sample badge — ensures prototype items are never misrepresented as live stock
-        if (product.isDemo) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.94f),
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                shape = RoundedCornerShape(bottomEnd = 10.dp),
-                modifier = Modifier.align(Alignment.TopStart)
-            ) {
-                Text(
-                    text = AppStrings.demoBadge.get(lang),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
         }

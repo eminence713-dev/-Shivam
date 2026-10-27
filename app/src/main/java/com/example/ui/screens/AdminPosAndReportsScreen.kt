@@ -607,7 +607,7 @@ fun AdminExpensesSection(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             items(expenses, key = { it.id }) { exp ->
-                val dt = SimpleDateFormat("dd MMM yyyy", Locale.US).format(exp.createdAt?.toDate() ?: Date())
+                val dt = SimpleDateFormat("dd MMM yyyy", Locale.US).format(exp.createdAtDate())
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(12.dp),

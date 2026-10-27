@@ -15,8 +15,8 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.ProductCost
 import com.example.data.model.StoreSettings
+import com.example.data.repository.LanguagePreferencesRepository
 import com.example.data.repository.StoreRepository
-import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 enum class ReportDateRange(val daysBack: Int?, val labelEn: String, val labelHi: String) {
@@ -55,12 +54,13 @@ data class SalesAnalyticsSummary(
 )
 
 class AdminViewModel(
-    private val repository: StoreRepository
+    private val repository: StoreRepository,
+    private val langPrefs: LanguagePreferencesRepository
 ) : ViewModel() {
 
     val allProductsState: StateFlow<UiState<List<Product>>> = repository.observeAllProductsForOwner()
         .map<List<Product>, UiState<List<Product>>> { list ->
-            UiState.Success(list.sortedByDescending { it.updatedAt ?: it.createdAt ?: Timestamp(0, 0) })
+            UiState.Success(list.sortedByDescending { it.updatedAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing owner products", e)
@@ -77,7 +77,7 @@ class AdminViewModel(
 
     val allOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeAllOrdersForOwner()
         .map<List<CustomerOrder>, UiState<List<CustomerOrder>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) })
+            UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing all orders", e)
@@ -87,7 +87,7 @@ class AdminViewModel(
 
     val offlineSalesState: StateFlow<UiState<List<OfflineSale>>> = repository.observeOfflineSalesForOwner()
         .map<List<OfflineSale>, UiState<List<OfflineSale>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) })
+            UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing offline sales", e)
@@ -97,7 +97,7 @@ class AdminViewModel(
 
     val expensesState: StateFlow<UiState<List<Expense>>> = repository.observeExpensesForOwner()
         .map<List<Expense>, UiState<List<Expense>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) })
+            UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing expenses", e)
@@ -107,7 +107,7 @@ class AdminViewModel(
 
     val movementsState: StateFlow<UiState<List<InventoryMovement>>> = repository.observeInventoryMovementsForOwner()
         .map<List<InventoryMovement>, UiState<List<InventoryMovement>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }.take(80))
+            UiState.Success(list.sortedByDescending { it.createdAtMillis }.take(80))
         }
         .catch { e ->
             Log.w(TAG, "Error observing stock movements", e)
@@ -130,6 +130,20 @@ class AdminViewModel(
 
     fun clearLastOfflineSale() {
         _lastRecordedOfflineSale.value = null
+    }
+
+    fun changeOwnerPassword(currentPassword: String, newPassword: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            langPrefs.changeOwnerPassword(currentPassword, newPassword).fold(
+                onSuccess = {
+                    _statusBanner.value = "Owner password updated successfully!"
+                    onSuccess()
+                },
+                onFailure = { e ->
+                    _statusBanner.value = e.localizedMessage ?: "Could not update owner password."
+                }
+            )
+        }
     }
 
     fun saveProduct(product: Product, costPriceInr: Long, supplierNote: String, onSaved: () -> Unit = {}) {
@@ -177,8 +191,8 @@ class AdminViewModel(
     fun hideAllDemoProducts(products: List<Product>) {
         viewModelScope.launch {
             repository.hideAllDemoProducts(products).fold(
-                onSuccess = { count -> _statusBanner.value = "Unpublished $count demo products." },
-                onFailure = { e -> _statusBanner.value = e.localizedMessage ?: "Could not hide demo items." }
+                onSuccess = { count -> _statusBanner.value = "Hidden $count starter sample items." },
+                onFailure = { e -> _statusBanner.value = e.localizedMessage ?: "Could not hide sample items." }
             )
         }
     }
@@ -190,8 +204,8 @@ class AdminViewModel(
             val res = repository.seedDemoProducts()
             _isBusy.value = false
             res.fold(
-                onSuccess = { count -> _statusBanner.value = "Loaded $count clearly labelled demo products." },
-                onFailure = { e -> _statusBanner.value = e.localizedMessage ?: "Could not seed demo products." }
+                onSuccess = { count -> _statusBanner.value = "Loaded $count starter shop items." },
+                onFailure = { e -> _statusBanner.value = e.localizedMessage ?: "Could not load starter items." }
             )
         }
     }
@@ -284,13 +298,13 @@ class AdminViewModel(
         val todayEpoch = StoreRepository.currentEpochDay()
         val minEpochDay = range.daysBack?.let { todayEpoch - it }
 
-        fun inRangeTimestamp(ts: Timestamp?): Boolean {
+        fun inRangeMillis(millis: Long): Boolean {
             if (minEpochDay == null) return true
-            val millis = (ts?.toDate()?.time ?: System.currentTimeMillis())
-            return (millis / 86_400_000L) >= minEpochDay
+            val safeMillis = if (millis > 0L) millis else System.currentTimeMillis()
+            return (safeMillis / 86_400_000L) >= minEpochDay
         }
 
-        val filteredOrders = orders.filter { inRangeTimestamp(it.createdAt) }
+        val filteredOrders = orders.filter { inRangeMillis(it.createdAtMillis) }
         val filteredOffline = offlineSales.filter {
             minEpochDay == null || it.saleDateEpochDay >= minEpochDay
         }
@@ -311,18 +325,17 @@ class AdminViewModel(
         val netRevenue = activeOrders.sumOf { (it.subtotalInr - it.discountInr).coerceAtLeast(0L) } +
             filteredOffline.sumOf { it.totalPaidInr }
 
-        // Strict Gross Profit Calculation: ONLY where product purchase cost is recorded (> 0)
         var cogsInr = 0L
         var costCoveredRevInr = 0L
         var uncostedUnits = 0L
 
-        val productAgg = mutableMapOf<String, Pair<Long, Long>>() // name -> (units, rev)
+        val productAgg = mutableMapOf<String, Pair<Long, Long>>()
         val categoryAgg = mutableMapOf<ProductCategory, Long>()
         val dayFmt = SimpleDateFormat("dd MMM", Locale.US)
         val dateAgg = linkedMapOf<String, Long>()
 
         activeOrders.forEach { order ->
-            val dayKey = dayFmt.format(order.createdAt?.toDate() ?: Date())
+            val dayKey = dayFmt.format(order.createdAtDate())
             dateAgg[dayKey] = (dateAgg[dayKey] ?: 0L) + (order.subtotalInr - order.discountInr).coerceAtLeast(0L)
 
             order.parsedItems().forEach { line ->
@@ -342,7 +355,7 @@ class AdminViewModel(
         }
 
         filteredOffline.forEach { sale ->
-            val dayKey = dayFmt.format(sale.createdAt?.toDate() ?: Date())
+            val dayKey = dayFmt.format(sale.createdAtDate())
             dateAgg[dayKey] = (dateAgg[dayKey] ?: 0L) + sale.totalPaidInr
 
             cogsInr += sale.totalCostInr

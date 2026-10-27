@@ -44,7 +44,7 @@ object InvoicePrintHelper {
 
     fun fromCustomerOrder(order: CustomerOrder): PrintableInvoiceData {
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
-            .format(order.createdAt?.toDate() ?: Date())
+            .format(order.createdAtDate())
         return PrintableInvoiceData(
             invoiceNumber = order.invoiceNumber.ifBlank { "BILL-${order.orderReference.takeLast(8)}" },
             orderReference = order.orderReference,
@@ -66,7 +66,7 @@ object InvoicePrintHelper {
 
     fun fromOfflineSale(sale: OfflineSale): PrintableInvoiceData {
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
-            .format(sale.createdAt?.toDate() ?: Date())
+            .format(sale.createdAtDate())
         return PrintableInvoiceData(
             invoiceNumber = sale.invoiceNumber,
             orderReference = "Shop Counter Sale",

@@ -12,15 +12,11 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.StoreSettings
 import com.example.data.repository.LanguagePreferencesRepository
 import com.example.data.repository.StoreRepository
-import com.google.firebase.Firebase
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -31,12 +27,6 @@ sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
     data class Error(val message: String) : UiState<Nothing>
-}
-
-sealed interface RoleVerificationState {
-    data object Checking : RoleVerificationState
-    data object AuthorizedOwner : RoleVerificationState
-    data class CustomerOnly(val email: String, val isEmailVerified: Boolean) : RoleVerificationState
 }
 
 enum class SortOption(val labelEn: String, val labelHi: String) {
@@ -50,19 +40,11 @@ enum class SortOption(val labelEn: String, val labelHi: String) {
 
 class StorefrontViewModel(
     private val repository: StoreRepository,
-    private val langPrefs: LanguagePreferencesRepository,
-    val currentUserId: String,
-    val defaultCustomerName: String
+    private val langPrefs: LanguagePreferencesRepository
 ) : ViewModel() {
 
     val language: StateFlow<AppLanguage> = langPrefs.languageFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), AppLanguage.ENGLISH)
-
-    private val _isOwnerAdmin = MutableStateFlow(false)
-    val isOwnerAdmin: StateFlow<Boolean> = _isOwnerAdmin.asStateFlow()
-
-    private val _roleVerificationState = MutableStateFlow<RoleVerificationState>(RoleVerificationState.Checking)
-    val roleVerificationState: StateFlow<RoleVerificationState> = _roleVerificationState.asStateFlow()
 
     val storeSettings: StateFlow<StoreSettings> = repository.observeStoreSettings()
         .catch { e ->
@@ -73,9 +55,7 @@ class StorefrontViewModel(
 
     val publishedProductsState: StateFlow<UiState<List<Product>>> = repository.observePublishedProducts()
         .map<List<Product>, UiState<List<Product>>> { list ->
-            UiState.Success(
-                list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
-            )
+            UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing published products", e)
@@ -83,11 +63,9 @@ class StorefrontViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
-    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeCustomerOrders(currentUserId)
+    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeCustomerOrders()
         .map<List<CustomerOrder>, UiState<List<CustomerOrder>>> { list ->
-            UiState.Success(
-                list.sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
-            )
+            UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
         .catch { e ->
             Log.w(TAG, "Error observing customer orders", e)
@@ -123,25 +101,10 @@ class StorefrontViewModel(
 
     init {
         viewModelScope.launch {
-            val user = Firebase.auth.currentUser
-            val owner = repository.checkIsOwnerAdmin(user)
-            _isOwnerAdmin.value = owner
-            _roleVerificationState.value = if (owner) {
-                RoleVerificationState.AuthorizedOwner
-            } else {
-                RoleVerificationState.CustomerOnly(
-                    email = user?.email.orEmpty(),
-                    isEmailVerified = user?.isEmailVerified == true
-                )
-            }
-            if (owner) {
-                // Auto-seed clearly labelled demo products on a brand-new empty store so prototype testing works immediately
-                runCatching {
-                    val existingAll = repository.observeAllProductsForOwner().first()
-                    if (existingAll.isEmpty()) {
-                        repository.seedDemoProducts()
-                    }
-                }
+            runCatching {
+                repository.ensureInitialCatalogSeeded(langPrefs)
+            }.onFailure { e ->
+                Log.w(TAG, "Error seeding initial catalog", e)
             }
         }
     }
@@ -169,6 +132,10 @@ class StorefrontViewModel(
 
     fun clearCheckoutError() {
         _checkoutError.value = null
+    }
+
+    suspend fun verifyOwnerPassword(password: String): Boolean {
+        return langPrefs.verifyOwnerPassword(password)
     }
 
     fun addToCart(

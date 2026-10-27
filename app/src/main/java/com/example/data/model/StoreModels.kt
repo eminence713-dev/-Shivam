@@ -1,10 +1,6 @@
 package com.example.data.model
 
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.IgnoreExtraProperties
-import com.google.firebase.firestore.ServerTimestamp
+import java.util.Date
 
 enum class AppLanguage {
     ENGLISH,
@@ -83,9 +79,8 @@ enum class ExpenseCategory(val labelEn: String, val labelHi: String) {
         if (lang == AppLanguage.HINDI) labelHi else labelEn
 }
 
-@IgnoreExtraProperties
 data class StoreSettings(
-    @DocumentId val id: String = "public_config",
+    val id: String = "public_config",
     val storeNameEn: String = "Shri Shivam Readymade & Riya Fancy Shoes Mart",
     val storeNameHi: String = "श्री शिवम रेडीमेड एंड रिया फैंसी शूज़ मार्ट",
     val ownerName: String = "Raju Kumar Gupta",
@@ -96,59 +91,29 @@ data class StoreSettings(
     val addressHi: String = "बड़ा बाज़ार, कल्याणपुर, मोतिहारी, बिहार, भारत",
     val promoBannerEn: String = "Welcome to our official Kalyanpur family clothing & footwear store! Browse festive & daily wear online or order on WhatsApp.",
     val promoBannerHi: String = "कल्याणपुर के आपके भरोसेमंद पारिवारिक कपड़े और फुटवियर स्टोर में स्वागत है! ऑनलाइन देखें या व्हाट्सऐप पर ऑर्डर करें।",
-    val deliveryCoverageEn: String = "Local areas around Bada Bazar, Kalyanpur & nearby villages (Awaiting final owner confirmation)",
-    val deliveryCoverageHi: String = "बड़ा बाज़ार, कल्याणपुर और आसपास के क्षेत्र (मालिक की अंतिम पुष्टि की प्रतीक्षा)",
+    val deliveryCoverageEn: String = "Local areas around Bada Bazar, Kalyanpur & nearby villages",
+    val deliveryCoverageHi: String = "बड़ा बाज़ार, कल्याणपुर और आसपास के क्षेत्र",
     val deliveryChargeInr: Long = 0L,
     val freeDeliveryThresholdInr: Long = 0L,
     val minOrderAmountInr: Long = 0L,
-    val expectedDeliveryEn: String = "Awaiting owner confirmation — contact shop on WhatsApp (9162685162) for delivery timing.",
-    val expectedDeliveryHi: String = "मालिक द्वारा समय की पुष्टि बाकी है — डिलीवरी जानकारी के लिए व्हाट्सऐप (9162685162) पर संपर्क करें।",
-    val returnPolicyEn: String = "Return & exchange policy awaiting owner confirmation. Please check size/colour at delivery or contact Raju Kumar Gupta at Bada Bazar, Kalyanpur.",
-    val returnPolicyHi: String = "वापसी और एक्सचेंज नीति की पुष्टि बाकी है। कृपया बड़ा बाज़ार, कल्याणपुर दुकान पर संपर्क करें।",
+    val expectedDeliveryEn: String = "Contact shop on WhatsApp (9162685162) for delivery timing.",
+    val expectedDeliveryHi: String = "डिलीवरी जानकारी के लिए व्हाट्सऐप (9162685162) पर संपर्क करें।",
+    val returnPolicyEn: String = "Easy size & colour check at Bada Bazar, Kalyanpur store. Contact Raju Kumar Gupta for support.",
+    val returnPolicyHi: String = "साइज़ या रंग बदलने हेतु बड़ा बाज़ार, कल्याणपुर दुकान पर संपर्क करें।",
     val policiesConfirmed: Boolean = false,
     val codEnabled: Boolean = true,
     val upiEnabled: Boolean = false,
     val merchantUpiId: String = "",
     val merchantPayeeName: String = "Shri Shivam Readymade & Riya Fancy Shoes Mart",
-    val updatedBy: String = "",
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val updatedBy: String = "owner",
+    val updatedAtMillis: Long = System.currentTimeMillis()
 ) {
     val isUpiConfiguredAndActive: Boolean
         get() = upiEnabled && merchantUpiId.contains("@") && merchantUpiId.length >= 5
-
-    fun toFirestoreMap(actorUid: String): Map<String, Any> = mapOf(
-        "storeNameEn" to storeNameEn.trim().take(150),
-        "storeNameHi" to storeNameHi.trim().ifBlank { storeNameEn.trim() }.take(150),
-        "ownerName" to ownerName.trim().take(100),
-        "phone" to phone.trim().take(20),
-        "whatsappNumber" to whatsappNumber.trim().take(20),
-        "email" to email.trim().take(120),
-        "addressEn" to addressEn.trim().take(250),
-        "addressHi" to addressHi.trim().ifBlank { addressEn.trim() }.take(250),
-        "promoBannerEn" to promoBannerEn.trim().take(300),
-        "promoBannerHi" to promoBannerHi.trim().take(300),
-        "deliveryCoverageEn" to deliveryCoverageEn.trim().take(300),
-        "deliveryCoverageHi" to deliveryCoverageHi.trim().take(300),
-        "deliveryChargeInr" to deliveryChargeInr.coerceIn(0L, 10000L),
-        "freeDeliveryThresholdInr" to freeDeliveryThresholdInr.coerceIn(0L, 1000000L),
-        "minOrderAmountInr" to minOrderAmountInr.coerceIn(0L, 1000000L),
-        "expectedDeliveryEn" to expectedDeliveryEn.trim().take(300),
-        "expectedDeliveryHi" to expectedDeliveryHi.trim().take(300),
-        "returnPolicyEn" to returnPolicyEn.trim().take(600),
-        "returnPolicyHi" to returnPolicyHi.trim().take(600),
-        "policiesConfirmed" to policiesConfirmed,
-        "codEnabled" to codEnabled,
-        "upiEnabled" to upiEnabled,
-        "merchantUpiId" to merchantUpiId.trim().take(100),
-        "merchantPayeeName" to merchantPayeeName.trim().take(120),
-        "updatedBy" to actorUid,
-        "updatedAt" to FieldValue.serverTimestamp()
-    )
 }
 
-@IgnoreExtraProperties
 data class Product(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val nameEn: String = "",
     val nameHi: String = "",
     val category: String = ProductCategory.SAREES.name,
@@ -169,9 +134,9 @@ data class Product(
     val isDemo: Boolean = false,
     val soldCount: Long = 0L,
     val lastOrderId: String = "",
-    val createdBy: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdBy: String = "owner",
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val updatedAtMillis: Long = System.currentTimeMillis()
 ) {
     fun displayName(lang: AppLanguage): String =
         if (lang == AppLanguage.HINDI && nameHi.isNotBlank()) nameHi else nameEn
@@ -186,64 +151,15 @@ data class Product(
 
     val isOutOfStock: Boolean
         get() = stockCount <= 0L
-
-    fun toCreateMap(ownerUid: String): Map<String, Any> = mapOf(
-        "nameEn" to nameEn.trim().take(140),
-        "nameHi" to nameHi.trim().take(140),
-        "category" to categoryEnum().name,
-        "descriptionEn" to descriptionEn.trim().take(1000),
-        "descriptionHi" to descriptionHi.trim().take(1000),
-        "sellingPriceInr" to sellingPriceInr.coerceIn(1L, 500000L),
-        "originalPriceInr" to originalPriceInr.coerceIn(0L, 500000L),
-        "stockCount" to stockCount.coerceIn(0L, 100000L),
-        "lowStockThreshold" to lowStockThreshold.coerceIn(0L, 1000L),
-        "sizes" to sizes.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15),
-        "colors" to colors.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15),
-        "variantNotes" to variantNotes.trim().take(300),
-        "sampleImageKey" to sampleImageKey.trim().take(60),
-        "imageUrl" to imageUrl.trim().take(600),
-        "imageBase64" to imageBase64.take(340000),
-        "isPublished" to isPublished,
-        "isFeatured" to isFeatured,
-        "isDemo" to isDemo,
-        "soldCount" to soldCount.coerceAtLeast(0L),
-        "createdBy" to ownerUid,
-        "createdAt" to FieldValue.serverTimestamp(),
-        "updatedAt" to FieldValue.serverTimestamp()
-    )
-
-    fun toOwnerUpdateMap(): Map<String, Any> = mapOf(
-        "nameEn" to nameEn.trim().take(140),
-        "nameHi" to nameHi.trim().take(140),
-        "category" to categoryEnum().name,
-        "descriptionEn" to descriptionEn.trim().take(1000),
-        "descriptionHi" to descriptionHi.trim().take(1000),
-        "sellingPriceInr" to sellingPriceInr.coerceIn(1L, 500000L),
-        "originalPriceInr" to originalPriceInr.coerceIn(0L, 500000L),
-        "stockCount" to stockCount.coerceIn(0L, 100000L),
-        "lowStockThreshold" to lowStockThreshold.coerceIn(0L, 1000L),
-        "sizes" to sizes.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15),
-        "colors" to colors.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15),
-        "variantNotes" to variantNotes.trim().take(300),
-        "sampleImageKey" to sampleImageKey.trim().take(60),
-        "imageUrl" to imageUrl.trim().take(600),
-        "imageBase64" to imageBase64.take(340000),
-        "isPublished" to isPublished,
-        "isFeatured" to isFeatured,
-        "isDemo" to isDemo,
-        "soldCount" to soldCount.coerceAtLeast(0L),
-        "updatedAt" to FieldValue.serverTimestamp()
-    )
 }
 
-@IgnoreExtraProperties
 data class ProductCost(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val productId: String = "",
     val costPriceInr: Long = 0L,
     val supplierNote: String = "",
-    val updatedBy: String = "",
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val updatedBy: String = "owner",
+    val updatedAtMillis: Long = System.currentTimeMillis()
 )
 
 data class CartItem(
@@ -268,42 +184,17 @@ data class OrderLineItem(
     val lineTotalInr: Long = 0L,
     val selectedSize: String = "",
     val selectedColor: String = ""
-) {
-    fun toMap(): Map<String, Any> = mapOf(
-        "productId" to productId,
-        "productName" to productName,
-        "category" to category,
-        "quantity" to quantity,
-        "unitPriceInr" to unitPriceInr,
-        "lineTotalInr" to lineTotalInr,
-        "selectedSize" to selectedSize,
-        "selectedColor" to selectedColor
-    )
+)
 
-    companion object {
-        fun fromRawMap(raw: Map<*, *>): OrderLineItem = OrderLineItem(
-            productId = raw["productId"] as? String ?: "",
-            productName = raw["productName"] as? String ?: "",
-            category = raw["category"] as? String ?: ProductCategory.SAREES.name,
-            quantity = (raw["quantity"] as? Number)?.toLong() ?: 1L,
-            unitPriceInr = (raw["unitPriceInr"] as? Number)?.toLong() ?: 0L,
-            lineTotalInr = (raw["lineTotalInr"] as? Number)?.toLong() ?: 0L,
-            selectedSize = raw["selectedSize"] as? String ?: "",
-            selectedColor = raw["selectedColor"] as? String ?: ""
-        )
-    }
-}
-
-@IgnoreExtraProperties
 data class CustomerOrder(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val orderReference: String = "",
-    val customerId: String = "",
+    val customerId: String = "local_customer",
     val customerName: String = "",
     val customerPhone: String = "",
     val deliveryAddress: String = "",
     val landmark: String = "",
-    val items: List<Map<String, Any>> = emptyList(),
+    val lineItems: List<OrderLineItem> = emptyList(),
     val itemSummary: String = "",
     val totalQuantity: Long = 1L,
     val subtotalInr: Long = 0L,
@@ -317,24 +208,24 @@ data class CustomerOrder(
     val stockDeducted: Boolean = true,
     val cancellationReason: String = "",
     val invoiceNumber: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val updatedAtMillis: Long = System.currentTimeMillis()
 ) {
-    fun parsedItems(): List<OrderLineItem> = items.map { OrderLineItem.fromRawMap(it) }
+    fun parsedItems(): List<OrderLineItem> = lineItems
     fun statusEnum(): OrderStatus = OrderStatus.fromKey(orderStatus)
     fun paymentStatusEnum(): PaymentStatus =
         PaymentStatus.entries.firstOrNull { it.name == paymentStatus } ?: PaymentStatus.PENDING
     fun paymentMethodEnum(): PaymentMethodType =
         PaymentMethodType.entries.firstOrNull { it.name == paymentMethod } ?: PaymentMethodType.COD
+    fun createdAtDate(): Date = Date(if (createdAtMillis > 0L) createdAtMillis else System.currentTimeMillis())
 }
 
-@IgnoreExtraProperties
 data class OfflineSale(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val invoiceNumber: String = "",
     val customerName: String = "",
     val customerPhone: String = "",
-    val items: List<Map<String, Any>> = emptyList(),
+    val lineItems: List<OrderLineItem> = emptyList(),
     val itemSummary: String = "",
     val subtotalInr: Long = 0L,
     val discountInr: Long = 0L,
@@ -343,31 +234,31 @@ data class OfflineSale(
     val costCoveredRevenueInr: Long = 0L,
     val allCostsRecorded: Boolean = false,
     val paymentMethod: String = "CASH",
-    val recordedBy: String = "",
+    val recordedBy: String = "owner",
     val saleDateEpochDay: Long = 0L,
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAtMillis: Long = System.currentTimeMillis()
 ) {
-    fun parsedItems(): List<OrderLineItem> = items.map { OrderLineItem.fromRawMap(it) }
+    fun parsedItems(): List<OrderLineItem> = lineItems
+    fun createdAtDate(): Date = Date(if (createdAtMillis > 0L) createdAtMillis else System.currentTimeMillis())
 }
 
-@IgnoreExtraProperties
 data class Expense(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val title: String = "",
     val category: String = ExpenseCategory.OTHER.name,
     val amountInr: Long = 0L,
     val notes: String = "",
-    val recordedBy: String = "",
+    val recordedBy: String = "owner",
     val expenseDateEpochDay: Long = 0L,
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAtMillis: Long = System.currentTimeMillis()
 ) {
     fun categoryEnum(): ExpenseCategory =
         ExpenseCategory.entries.firstOrNull { it.name == category } ?: ExpenseCategory.OTHER
+    fun createdAtDate(): Date = Date(if (createdAtMillis > 0L) createdAtMillis else System.currentTimeMillis())
 }
 
-@IgnoreExtraProperties
 data class InventoryMovement(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val productId: String = "",
     val productName: String = "",
     val previousStock: Long = 0L,
@@ -375,6 +266,8 @@ data class InventoryMovement(
     val delta: Long = 0L,
     val reason: String = "MANUAL_UPDATE",
     val referenceId: String = "",
-    val actorId: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null
-)
+    val actorId: String = "owner",
+    val createdAtMillis: Long = System.currentTimeMillis()
+) {
+    fun createdAtDate(): Date = Date(if (createdAtMillis > 0L) createdAtMillis else System.currentTimeMillis())
+}
