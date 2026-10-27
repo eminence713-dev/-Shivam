@@ -1,3 +1,4 @@
+import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 import java.time.Duration
 
 plugins {
@@ -6,6 +7,10 @@ plugins {
   // alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+}
+
+googleServices {
+  missingGoogleServicesStrategy = MissingGoogleServicesStrategy.IGNORE
 }
 
 android {

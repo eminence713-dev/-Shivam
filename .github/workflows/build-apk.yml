@@ -58,7 +58,7 @@ jobs:
             yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
             set -o pipefail
 
-            "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "platform-tools" "build-tools;36.0.0" "platforms;android-36"
+            "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "platform-tools" "build-tools;36.0.0" "build-tools;36.1.0" "platforms;android-36"
             "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "platforms;android-36.1" || true
 
             if [ ! -d "$SDK_DIR/platforms/android-36.1" ] && [ -d "$SDK_DIR/platforms/android-36" ]; then
@@ -86,9 +86,9 @@ jobs:
           set -euo pipefail
           {
             if [ -s "debug.keystore.base64" ]; then
-              tr -d '\n\r\t ' < debug.keystore.base64 | base64 --decode > debug.keystore
+              tr -d '\n\r\t ' < debug.keystore.base64 | base64 --decode > debug.keystore || rm -f debug.keystore
             elif [ -n "${DEBUG_KEYSTORE_SECRET:-}" ]; then
-              printf '%s' "$DEBUG_KEYSTORE_SECRET" | tr -d '\n\r\t ' | base64 --decode > debug.keystore
+              printf '%s' "$DEBUG_KEYSTORE_SECRET" | tr -d '\n\r\t ' | base64 --decode > debug.keystore || rm -f debug.keystore
             fi
             if [ ! -s "debug.keystore" ]; then
               keytool -genkeypair -v \
@@ -108,9 +108,13 @@ jobs:
               if printf '%s' "$GOOGLE_SERVICES_SECRET" | grep -q '{'; then
                 printf '%s' "$GOOGLE_SERVICES_SECRET" > app/google-services.json
               else
-                printf '%s' "$GOOGLE_SERVICES_SECRET" | tr -d '\n\r\t ' | base64 --decode > app/google-services.json
+                printf '%s' "$GOOGLE_SERVICES_SECRET" | tr -d '\n\r\t ' | base64 --decode > app/google-services.json || rm -f app/google-services.json
               fi
-              echo "FIREBASE_CONFIG_MODE=secret" >> "$GITHUB_ENV"
+              if [ -s "app/google-services.json" ]; then
+                echo "FIREBASE_CONFIG_MODE=secret" >> "$GITHUB_ENV"
+              else
+                echo "FIREBASE_CONFIG_MODE=passthrough" >> "$GITHUB_ENV"
+              fi
             else
               rm -f app/google-services.json
               echo "FIREBASE_CONFIG_MODE=passthrough" >> "$GITHUB_ENV"
@@ -174,6 +178,7 @@ jobs:
               echo "नीचे **Artifacts** सेक्शन में **Shivam-Riya-Mart-APK** पर क्लिक करके अपना APK डाउनलोड करें।"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+          exit 0
 
       - name: Print Diagnostics on Failure
         if: failure()
