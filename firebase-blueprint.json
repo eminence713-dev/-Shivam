@@ -132,7 +132,7 @@
       "type": "object",
       "properties": {
         "orderReference": { "type": "string", "description": "Human-readable unique order reference (e.g., SSR-20261026-1234)." },
-        "customerId": { "type": "string", "description": "Authenticated customer UID." },
+        "customerId": { "type": "string", "description": "Authenticated customer UID, or 'guest' for zero-login storefront orders (readable only by verified shop owner)." },
         "customerName": { "type": "string", "description": "Recipient full name." },
         "customerPhone": { "type": "string", "description": "10-digit Indian mobile number." },
         "deliveryAddress": { "type": "string", "description": "Complete local delivery address." },

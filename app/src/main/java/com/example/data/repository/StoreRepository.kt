@@ -20,6 +20,7 @@ import com.example.data.model.StoreSettings
 import com.example.util.OperationType
 import com.example.util.handleFirestoreError
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -38,16 +39,34 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-class StoreRepository(
-    private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+class StoreRepository private constructor(
+    private val db: FirebaseFirestore?,
+    private val auth: FirebaseAuth?,
+    @Suppress("UNUSED_PARAMETER") internalMarker: Boolean
 ) {
+    constructor(
+        db: FirebaseFirestore,
+        auth: FirebaseAuth = Firebase.auth
+    ) : this(db = db, auth = auth, internalMarker = true)
+
     constructor(context: Context) : this(
-        db = FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        ),
-        auth = Firebase.auth
+        db = if (FirebaseApp.getApps(context.applicationContext).isNotEmpty()) {
+            FirebaseFirestore.getInstance(
+                context.applicationContext.getString(R.string.firestore_database_id)
+            )
+        } else {
+            null
+        },
+        auth = if (FirebaseApp.getApps(context.applicationContext).isNotEmpty()) {
+            Firebase.auth
+        } else {
+            null
+        },
+        internalMarker = true
     )
+
+    val isCloudConfigured: Boolean
+        get() = db != null
 
     companion object {
         val VERIFIED_OWNER_EMAILS = setOf(
@@ -75,12 +94,13 @@ class StoreRepository(
     }
 
     private fun requireUid(): String =
-        checkNotNull(auth.currentUser?.uid) { "Please sign in with Google to continue." }
+        checkNotNull(auth?.currentUser?.uid) { "Please sign in with the verified Shop Owner Google account to sync cloud changes." }
 
     suspend fun isUserRegisteredAdmin(uid: String): Boolean {
+        val database = db ?: return false
         if (uid.isBlank()) return false
         return try {
-            val snap = db.collection("admins").document(uid).get().await()
+            val snap = database.collection("admins").document(uid).get().await()
             snap.exists()
         } catch (e: CancellationException) {
             throw e
@@ -94,13 +114,14 @@ class StoreRepository(
      * and the cloud `/products` collection is completely empty.
      */
     suspend fun ensureInitialCatalogSeededForOwner() {
-        val user = auth.currentUser ?: return
+        val database = db ?: return
+        val user = auth?.currentUser ?: return
         val emailLower = user.email?.lowercase(Locale.US).orEmpty()
         val isTokenOwner = user.isEmailVerified && emailLower in VERIFIED_OWNER_EMAILS
         if (!isTokenOwner && !isUserRegisteredAdmin(user.uid)) return
 
         try {
-            val existing = db.collection("products").limit(1).get().await()
+            val existing = database.collection("products").limit(1).get().await()
             if (existing.isEmpty) {
                 seedDemoProducts()
             }
@@ -111,8 +132,9 @@ class StoreRepository(
         }
     }
 
-    fun observeStoreSettings(): Flow<StoreSettings> =
-        db.collection("store_settings")
+    fun observeStoreSettings(): Flow<StoreSettings> {
+        val database = db ?: return LocalFallbackStore.observeSettings()
+        return database.collection("store_settings")
             .document("public_config")
             .snapshots()
             .map { snap -> if (snap.exists()) snap.toStoreSettings() else StoreSettings() }
@@ -120,10 +142,21 @@ class StoreRepository(
                 handleFirestoreError(e, OperationType.GET, "store_settings/public_config")
                 throw e
             }
+    }
+
+    fun observeHasCloudStoreConfig(): Flow<Boolean> {
+        val database = db ?: return kotlinx.coroutines.flow.flowOf(false)
+        return database.collection("store_settings")
+            .document("public_config")
+            .snapshots()
+            .map { snap -> snap.exists() }
+            .catch { emit(false) }
+    }
 
     suspend fun saveStoreSettings(settings: StoreSettings): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.saveSettings(settings)
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
-        val docRef = db.collection("store_settings").document("public_config")
+        val docRef = database.collection("store_settings").document("public_config")
         val payload = mapOf<String, Any?>(
             "storeNameEn" to settings.storeNameEn.trim().ifBlank { "Shri Shivam Readymade & Riya Fancy Shoes Mart" }.take(150),
             "storeNameHi" to settings.storeNameHi.trim().ifBlank { "श्री शिवम रेडीमेड एंड रिया फैंसी शूज़ मार्ट" }.take(150),
@@ -154,7 +187,7 @@ class StoreRepository(
         ).filterValues { it != null }
 
         return try {
-            db.runTransaction { tx ->
+            database.runTransaction { tx ->
                 val snap = tx.get(docRef)
                 if (snap.exists()) {
                     tx.update(docRef, payload)
@@ -171,8 +204,9 @@ class StoreRepository(
         }
     }
 
-    fun observePublishedProducts(): Flow<List<Product>> =
-        db.collection("products")
+    fun observePublishedProducts(): Flow<List<Product>> {
+        val database = db ?: return LocalFallbackStore.observePublishedProducts()
+        return database.collection("products")
             .whereEqualTo("isPublished", true)
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toProductOrNull() } }
@@ -180,18 +214,22 @@ class StoreRepository(
                 handleFirestoreError(e, OperationType.LIST, "products")
                 throw e
             }
+    }
 
-    fun observeAllProductsForOwner(): Flow<List<Product>> =
-        db.collection("products")
+    fun observeAllProductsForOwner(): Flow<List<Product>> {
+        val database = db ?: return LocalFallbackStore.observeAllProducts()
+        return database.collection("products")
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toProductOrNull() } }
             .catch { e ->
                 handleFirestoreError(e, OperationType.LIST, "products")
                 throw e
             }
+    }
 
-    fun observeProductCostsForOwner(): Flow<Map<String, ProductCost>> =
-        db.collection("product_costs")
+    fun observeProductCostsForOwner(): Flow<Map<String, ProductCost>> {
+        val database = db ?: return LocalFallbackStore.observeCosts()
+        return database.collection("product_costs")
             .snapshots()
             .map { snapshot ->
                 snapshot.documents.mapNotNull { it.toProductCostOrNull() }.associateBy { it.productId }
@@ -200,12 +238,14 @@ class StoreRepository(
                 handleFirestoreError(e, OperationType.LIST, "product_costs")
                 throw e
             }
+    }
 
     suspend fun saveProductWithCost(
         product: Product,
         costPriceInr: Long,
         supplierNote: String = ""
     ): Result<String> {
+        val database = db ?: return LocalFallbackStore.saveProductWithCost(product, costPriceInr, supplierNote)
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val isNew = product.id.isBlank()
         val productId = if (isNew) {
@@ -213,8 +253,8 @@ class StoreRepository(
         } else {
             product.id
         }
-        val prodRef = db.collection("products").document(productId)
-        val costRef = db.collection("product_costs").document(productId)
+        val prodRef = database.collection("products").document(productId)
+        val costRef = database.collection("product_costs").document(productId)
 
         val cleanNameEn = product.nameEn.trim().take(140)
         if (cleanNameEn.isEmpty()) {
@@ -229,8 +269,7 @@ class StoreRepository(
         val cleanCategory = ProductCategory.fromKey(product.category).name
 
         return try {
-            db.runTransaction { tx ->
-                // All reads BEFORE writes
+            database.runTransaction { tx ->
                 val existingSnap = tx.get(prodRef)
                 val existingCostSnap = tx.get(costRef)
                 val previousStock = existingSnap.getLong("stockCount") ?: 0L
@@ -284,7 +323,7 @@ class StoreRepository(
 
                 if (!existingSnap.exists() || previousStock != newStock) {
                     val movId = "mov_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-                    val movRef = db.collection("inventory_movements").document(movId)
+                    val movRef = database.collection("inventory_movements").document(movId)
                     tx.set(
                         movRef,
                         mapOf(
@@ -311,13 +350,14 @@ class StoreRepository(
     }
 
     suspend fun updateProductStockManually(product: Product, newStockCount: Long): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.updateStockManually(product, newStockCount)
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (product.id.isBlank()) return Result.failure(IllegalArgumentException("Invalid product ID"))
         val clampedStock = newStockCount.coerceIn(0L, 100_000L)
-        val prodRef = db.collection("products").document(product.id)
+        val prodRef = database.collection("products").document(product.id)
 
         return try {
-            db.runTransaction { tx ->
+            database.runTransaction { tx ->
                 val snap = tx.get(prodRef)
                 if (!snap.exists()) error("Product no longer exists")
                 val prevStock = snap.getLong("stockCount") ?: 0L
@@ -333,7 +373,7 @@ class StoreRepository(
                 )
                 val movId = "mov_${UUID.randomUUID().toString().replace("-", "").take(16)}"
                 tx.set(
-                    db.collection("inventory_movements").document(movId),
+                    database.collection("inventory_movements").document(movId),
                     mapOf(
                         "productId" to product.id,
                         "productName" to prodName,
@@ -357,9 +397,10 @@ class StoreRepository(
     }
 
     suspend fun setProductPublished(productId: String, isPublished: Boolean): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.setPublished(productId, isPublished)
         runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         return try {
-            db.collection("products").document(productId)
+            database.collection("products").document(productId)
                 .update(
                     mapOf(
                         "isPublished" to isPublished,
@@ -377,14 +418,15 @@ class StoreRepository(
     }
 
     suspend fun hideAllDemoProducts(products: List<Product>): Result<Int> {
+        val database = db ?: return LocalFallbackStore.hideAllDemoProducts(products)
         runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val publishedDemos = products.filter { it.isDemo && it.isPublished && it.id.isNotBlank() }
         if (publishedDemos.isEmpty()) return Result.success(0)
         return try {
-            val batch = db.batch()
+            val batch = database.batch()
             publishedDemos.forEach { demo ->
                 batch.update(
-                    db.collection("products").document(demo.id),
+                    database.collection("products").document(demo.id),
                     mapOf(
                         "isPublished" to false,
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -402,11 +444,12 @@ class StoreRepository(
     }
 
     suspend fun deleteProduct(productId: String): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.deleteProduct(productId)
         runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         return try {
-            val batch = db.batch()
-            batch.delete(db.collection("products").document(productId))
-            batch.delete(db.collection("product_costs").document(productId))
+            val batch = database.batch()
+            batch.delete(database.collection("products").document(productId))
+            batch.delete(database.collection("product_costs").document(productId))
             batch.commit().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -418,21 +461,22 @@ class StoreRepository(
     }
 
     suspend fun seedDemoProducts(): Result<Int> {
+        val database = db ?: return LocalFallbackStore.seedDemoProducts()
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val entries = DemoCatalog.buildSeedEntries()
         return try {
             val existingProdSnaps = entries.associate { entry ->
-                entry.id to db.collection("products").document(entry.id).get().await()
+                entry.id to database.collection("products").document(entry.id).get().await()
             }
             val existingCostSnaps = entries.associate { entry ->
-                entry.id to db.collection("product_costs").document(entry.id).get().await()
+                entry.id to database.collection("product_costs").document(entry.id).get().await()
             }
 
-            val batch = db.batch()
+            val batch = database.batch()
             entries.forEach { entry ->
                 val p = entry.product
-                val prodRef = db.collection("products").document(entry.id)
-                val costRef = db.collection("product_costs").document(entry.id)
+                val prodRef = database.collection("products").document(entry.id)
+                val costRef = database.collection("product_costs").document(entry.id)
                 val prodSnap = existingProdSnaps.getValue(entry.id)
                 val costSnap = existingCostSnaps.getValue(entry.id)
 
@@ -469,7 +513,7 @@ class StoreRepository(
                     val movId = "mov_seed_${entry.id}_${UUID.randomUUID().toString().take(4)}"
                         .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                     batch.set(
-                        db.collection("inventory_movements").document(movId),
+                        database.collection("inventory_movements").document(movId),
                         mapOf(
                             "productId" to entry.id,
                             "productName" to p.nameEn.take(140),
@@ -516,7 +560,6 @@ class StoreRepository(
         cartItems: List<CartItem>,
         deterministicOrderId: String? = null
     ): Result<CustomerOrder> {
-        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (cartItems.isEmpty()) {
             return Result.failure(IllegalArgumentException("Cart is empty"))
         }
@@ -524,21 +567,229 @@ class StoreRepository(
         if (!cleanPhone.matches(Regex("^[6-9][0-9]{9}$"))) {
             return Result.failure(IllegalArgumentException("Valid 10-digit Indian mobile number required"))
         }
+        if (customerName.trim().length < 2) {
+            return Result.failure(IllegalArgumentException("Please enter customer full name"))
+        }
+        if (deliveryAddress.trim().length < 5) {
+            return Result.failure(IllegalArgumentException("Please enter full delivery address"))
+        }
 
         val orderId = deterministicOrderId?.takeIf { it.isNotBlank() }
-            ?: "ord_${UUID.randomUUID().toString().replace("-", "").take(18)}"
-        val nowMillis = System.currentTimeMillis()
+            ?: "ord_${UUID.randomUUID().toString().replace("-", "").take(20)}"
 
+        val database = db ?: return LocalFallbackStore.placeCustomerOrder(
+            customerName = customerName,
+            customerPhone = cleanPhone,
+            deliveryAddress = deliveryAddress,
+            landmark = landmark,
+            paymentMethod = paymentMethod,
+            cartItems = cartItems,
+            orderId = orderId
+        )
+
+        val signedInUid = auth?.currentUser?.uid
+        return if (signedInUid != null) {
+            placeAuthenticatedAtomicOrder(
+                database = database,
+                uid = signedInUid,
+                orderId = orderId,
+                customerName = customerName,
+                cleanPhone = cleanPhone,
+                deliveryAddress = deliveryAddress,
+                landmark = landmark,
+                paymentMethod = paymentMethod,
+                cartItems = cartItems
+            )
+        } else {
+            placeGuestCloudOrder(
+                database = database,
+                orderId = orderId,
+                customerName = customerName,
+                cleanPhone = cleanPhone,
+                deliveryAddress = deliveryAddress,
+                landmark = landmark,
+                paymentMethod = paymentMethod,
+                cartItems = cartItems
+            )
+        }
+    }
+
+    private suspend fun placeGuestCloudOrder(
+        database: FirebaseFirestore,
+        orderId: String,
+        customerName: String,
+        cleanPhone: String,
+        deliveryAddress: String,
+        landmark: String,
+        paymentMethod: PaymentMethodType,
+        cartItems: List<CartItem>
+    ): Result<CustomerOrder> {
+        val nowMillis = System.currentTimeMillis()
         val requestedQtyByProduct: Map<String, Int> = cartItems
             .groupBy { it.product.id }
             .mapValues { (_, list) -> list.sumOf { it.quantity } }
 
-        val orderRef = db.collection("orders").document(orderId)
-        val settingsRef = db.collection("store_settings").document("public_config")
+        return try {
+            val settingsSnap = database.collection("store_settings").document("public_config").get().await()
+            val settings = if (settingsSnap.exists()) settingsSnap.toStoreSettings() else StoreSettings()
+            if (paymentMethod == PaymentMethodType.COD && !settings.codEnabled) {
+                error("Cash on Delivery is currently disabled by the shop owner.")
+            }
+            if (paymentMethod == PaymentMethodType.UPI_QR && !settings.isUpiConfiguredAndActive) {
+                error("UPI QR payment is awaiting verified merchant setup by the shop owner.")
+            }
+
+            val resolvedProducts = mutableMapOf<String, Product>()
+            for ((prodId, totalReqQty) in requestedQtyByProduct) {
+                val snap = runCatching {
+                    database.collection("products").document(prodId).get().await()
+                }.getOrNull()
+                val cloudProd = snap?.toProductOrNull()
+                val fallbackStarter = cartItems.first { it.product.id == prodId }.product
+                    .takeIf { cloudProd == null && !settingsSnap.exists() && it.isDemo }
+                val effectiveProd = cloudProd ?: fallbackStarter
+                    ?: error("One or more items are no longer available in the store.")
+
+                if (!effectiveProd.isPublished) {
+                    error("${effectiveProd.nameEn} is currently unavailable.")
+                }
+                if (totalReqQty <= 0 || totalReqQty > 100 || totalReqQty.toLong() > effectiveProd.stockCount) {
+                    error("Insufficient stock for ${effectiveProd.nameEn} (Available: ${effectiveProd.stockCount}).")
+                }
+                resolvedProducts[prodId] = effectiveProd
+            }
+
+            val verifiedLineItems = cartItems.map { cartItem ->
+                val prod = resolvedProducts.getValue(cartItem.product.id)
+                val unitPrice = prod.sellingPriceInr
+                val qty = cartItem.quantity.toLong()
+                OrderLineItem(
+                    productId = cartItem.product.id,
+                    productName = prod.nameEn.take(120),
+                    category = prod.category,
+                    quantity = qty,
+                    unitPriceInr = unitPrice,
+                    lineTotalInr = unitPrice * qty,
+                    selectedSize = cartItem.selectedSize.take(40),
+                    selectedColor = cartItem.selectedColor.take(40)
+                )
+            }
+
+            val subtotalInr = verifiedLineItems.sumOf { it.lineTotalInr }
+            if (settings.minOrderAmountInr > 0 && subtotalInr < settings.minOrderAmountInr) {
+                error("Minimum order amount is ₹${settings.minOrderAmountInr}.")
+            }
+
+            val deliveryChargeInr = when {
+                !settings.policiesConfirmed -> 0L
+                settings.freeDeliveryThresholdInr > 0 && subtotalInr >= settings.freeDeliveryThresholdInr -> 0L
+                else -> settings.deliveryChargeInr.coerceAtLeast(0L)
+            }
+            val totalPayableInr = subtotalInr + deliveryChargeInr
+            val totalQuantity = verifiedLineItems.sumOf { it.quantity }
+            val orderReference = generateOrderReference()
+            val itemSummary = verifiedLineItems.joinToString(", ") {
+                buildString {
+                    append(it.productName)
+                    if (it.selectedSize.isNotBlank()) append(" (${it.selectedSize})")
+                    append(" x${it.quantity}")
+                }
+            }.take(580)
+
+            val itemMaps = verifiedLineItems.map { line ->
+                mapOf(
+                    "productId" to line.productId,
+                    "productName" to line.productName,
+                    "category" to line.category,
+                    "quantity" to line.quantity,
+                    "unitPriceInr" to line.unitPriceInr,
+                    "lineTotalInr" to line.lineTotalInr,
+                    "selectedSize" to line.selectedSize,
+                    "selectedColor" to line.selectedColor
+                )
+            }
+
+            val orderPayload = mapOf<String, Any?>(
+                "orderReference" to orderReference,
+                "customerId" to "guest",
+                "customerName" to customerName.trim().take(100),
+                "customerPhone" to cleanPhone,
+                "deliveryAddress" to deliveryAddress.trim().take(400),
+                "landmark" to landmark.trim().take(200),
+                "items" to itemMaps,
+                "itemSummary" to itemSummary,
+                "totalQuantity" to totalQuantity,
+                "subtotalInr" to subtotalInr,
+                "deliveryChargeInr" to deliveryChargeInr,
+                "discountInr" to 0L,
+                "totalPayableInr" to totalPayableInr,
+                "deliveryFeeConfirmed" to settings.policiesConfirmed,
+                "paymentMethod" to paymentMethod.name,
+                "paymentStatus" to PaymentStatus.PENDING.name,
+                "orderStatus" to OrderStatus.PENDING.name,
+                "stockDeducted" to false,
+                "cancellationReason" to "",
+                "invoiceNumber" to "",
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            ).filterValues { it != null }
+
+            database.collection("orders").document(orderId).set(orderPayload).await()
+
+            Result.success(
+                CustomerOrder(
+                    id = orderId,
+                    orderReference = orderReference,
+                    customerId = "guest",
+                    customerName = customerName.trim().take(100),
+                    customerPhone = cleanPhone,
+                    deliveryAddress = deliveryAddress.trim().take(400),
+                    landmark = landmark.trim().take(200),
+                    lineItems = verifiedLineItems,
+                    itemSummary = itemSummary,
+                    totalQuantity = totalQuantity,
+                    subtotalInr = subtotalInr,
+                    deliveryChargeInr = deliveryChargeInr,
+                    discountInr = 0L,
+                    totalPayableInr = totalPayableInr,
+                    deliveryFeeConfirmed = settings.policiesConfirmed,
+                    paymentMethod = paymentMethod.name,
+                    paymentStatus = PaymentStatus.PENDING.name,
+                    orderStatus = OrderStatus.PENDING.name,
+                    stockDeducted = false,
+                    createdAtMillis = nowMillis,
+                    updatedAtMillis = nowMillis
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "orders/$orderId")
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun placeAuthenticatedAtomicOrder(
+        database: FirebaseFirestore,
+        uid: String,
+        orderId: String,
+        customerName: String,
+        cleanPhone: String,
+        deliveryAddress: String,
+        landmark: String,
+        paymentMethod: PaymentMethodType,
+        cartItems: List<CartItem>
+    ): Result<CustomerOrder> {
+        val nowMillis = System.currentTimeMillis()
+        val requestedQtyByProduct: Map<String, Int> = cartItems
+            .groupBy { it.product.id }
+            .mapValues { (_, list) -> list.sumOf { it.quantity } }
+
+        val orderRef = database.collection("orders").document(orderId)
+        val settingsRef = database.collection("store_settings").document("public_config")
 
         return try {
-            val createdOrder = db.runTransaction { tx ->
-                // 1. ALL READS FIRST
+            val createdOrder = database.runTransaction { tx ->
                 val existingOrderSnap = tx.get(orderRef)
                 if (existingOrderSnap.exists()) {
                     error("Duplicate order submission detected. Please check My Orders.")
@@ -554,7 +805,7 @@ class StoreRepository(
                 }
 
                 val productSnaps = requestedQtyByProduct.keys.associateWith { prodId ->
-                    tx.get(db.collection("products").document(prodId))
+                    tx.get(database.collection("products").document(prodId))
                 }
 
                 requestedQtyByProduct.forEach { (prodId, totalReqQty) ->
@@ -568,7 +819,6 @@ class StoreRepository(
                     }
                 }
 
-                // 2. COMPUTE VERIFIED LINE ITEMS & TOTALS
                 val verifiedLineItems = cartItems.map { cartItem ->
                     val prod = productSnaps.getValue(cartItem.product.id).toProductOrNull()!!
                     val unitPrice = prod.sellingPriceInr
@@ -620,7 +870,6 @@ class StoreRepository(
                     )
                 }
 
-                // 3. ALL WRITES ATOMICALLY (Order + Product Stock + Inventory Movements)
                 val orderPayload = mapOf<String, Any?>(
                     "orderReference" to orderReference,
                     "customerId" to uid,
@@ -652,7 +901,7 @@ class StoreRepository(
                     val prod = productSnaps.getValue(prodId).toProductOrNull()!!
                     val prevStock = prod.stockCount
                     val newStock = prevStock - totalReqQty.toLong()
-                    val prodRef = db.collection("products").document(prodId)
+                    val prodRef = database.collection("products").document(prodId)
                     tx.update(
                         prodRef,
                         mapOf(
@@ -667,7 +916,7 @@ class StoreRepository(
                         .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                         .take(120)
                     tx.set(
-                        db.collection("inventory_movements").document(movId),
+                        database.collection("inventory_movements").document(movId),
                         mapOf(
                             "productId" to prodId,
                             "productName" to prod.nameEn.take(140),
@@ -715,9 +964,10 @@ class StoreRepository(
         }
     }
 
-    fun observeCustomerOrders(customerId: String = auth.currentUser?.uid.orEmpty()): Flow<List<CustomerOrder>> {
-        if (customerId.isBlank()) return emptyFlow()
-        return db.collection("orders")
+    fun observeCustomerOrders(customerId: String = auth?.currentUser?.uid.orEmpty()): Flow<List<CustomerOrder>> {
+        val database = db ?: return emptyFlow()
+        if (customerId.isBlank() || customerId == "guest") return emptyFlow()
+        return database.collection("orders")
             .whereEqualTo("customerId", customerId)
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toCustomerOrderOrNull() } }
@@ -728,9 +978,10 @@ class StoreRepository(
     }
 
     suspend fun getOrderById(orderId: String): Result<CustomerOrder> {
+        val database = db ?: return Result.failure(IllegalStateException("Cloud database not configured"))
         runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         return try {
-            val snap = db.collection("orders").document(orderId).get().await()
+            val snap = database.collection("orders").document(orderId).get().await()
             val order = snap.toCustomerOrderOrNull() ?: error("Order not found")
             Result.success(order)
         } catch (e: CancellationException) {
@@ -741,14 +992,16 @@ class StoreRepository(
         }
     }
 
-    fun observeAllOrdersForOwner(): Flow<List<CustomerOrder>> =
-        db.collection("orders")
+    fun observeAllOrdersForOwner(): Flow<List<CustomerOrder>> {
+        val database = db ?: return LocalFallbackStore.observeOrders()
+        return database.collection("orders")
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toCustomerOrderOrNull() } }
             .catch { e ->
                 handleFirestoreError(e, OperationType.LIST, "orders")
                 throw e
             }
+    }
 
     suspend fun updateOrderByOwner(
         orderId: String,
@@ -757,17 +1010,31 @@ class StoreRepository(
         cancellationReason: String = "",
         generateInvoiceIfMissing: Boolean = false
     ): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.updateOrderByOwner(
+            orderId = orderId,
+            newStatus = newOrderStatus,
+            newPaymentStatus = newPaymentStatus,
+            cancellationReason = cancellationReason,
+            generateInvoice = generateInvoiceIfMissing
+        )
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
-        val orderRef = db.collection("orders").document(orderId)
+        val orderRef = database.collection("orders").document(orderId)
 
         return try {
-            db.runTransaction { tx ->
+            database.runTransaction { tx ->
                 // 1. ALL READS FIRST
                 val orderSnap = tx.get(orderRef)
                 val currentOrder = orderSnap.toCustomerOrderOrNull() ?: error("Order not found")
+                val shouldDeductGuestStock = !currentOrder.stockDeducted &&
+                    newOrderStatus in listOf(
+                        OrderStatus.CONFIRMED,
+                        OrderStatus.PACKED,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                        OrderStatus.DELIVERED
+                    )
                 val shouldRestock = newOrderStatus == OrderStatus.CANCELLED && currentOrder.stockDeducted
 
-                val lineItemsByProduct = if (shouldRestock) {
+                val lineItemsByProduct = if (shouldDeductGuestStock || shouldRestock) {
                     currentOrder.parsedItems()
                         .filter { it.productId.isNotBlank() }
                         .groupBy { it.productId }
@@ -777,12 +1044,51 @@ class StoreRepository(
                 }
 
                 val prodSnaps = lineItemsByProduct.keys.associateWith { prodId ->
-                    tx.get(db.collection("products").document(prodId))
+                    tx.get(database.collection("products").document(prodId))
                 }
 
                 // 2. WRITES
                 var updatedStockDeducted = currentOrder.stockDeducted
-                if (shouldRestock) {
+                if (shouldDeductGuestStock) {
+                    lineItemsByProduct.forEach { (prodId, qtyToDeduct) ->
+                        val pSnap = prodSnaps[prodId]
+                        if (pSnap != null && pSnap.exists()) {
+                            val prevStock = pSnap.getLong("stockCount") ?: 0L
+                            val prevSold = pSnap.getLong("soldCount") ?: 0L
+                            val newStock = (prevStock - qtyToDeduct).coerceAtLeast(0L)
+                            val newSold = (prevSold + qtyToDeduct).coerceAtMost(1_000_000L)
+                            val prodName = pSnap.getString("nameEn")?.take(140).orEmpty().ifBlank { "Product" }
+
+                            tx.update(
+                                database.collection("products").document(prodId),
+                                mapOf(
+                                    "stockCount" to newStock,
+                                    "soldCount" to newSold,
+                                    "lastOrderId" to orderId,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                            val movId = "mov_confirm_${orderId}_${prodId.takeLast(6)}_${UUID.randomUUID().toString().take(4)}"
+                                .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                                .take(120)
+                            tx.set(
+                                database.collection("inventory_movements").document(movId),
+                                mapOf(
+                                    "productId" to prodId,
+                                    "productName" to prodName,
+                                    "previousStock" to prevStock,
+                                    "newStock" to newStock,
+                                    "delta" to (newStock - prevStock),
+                                    "reason" to "ONLINE_ORDER",
+                                    "referenceId" to orderId,
+                                    "actorId" to uid,
+                                    "createdAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                        }
+                    }
+                    updatedStockDeducted = true
+                } else if (shouldRestock) {
                     lineItemsByProduct.forEach { (prodId, qtyToRestore) ->
                         val pSnap = prodSnaps[prodId]
                         if (pSnap != null && pSnap.exists()) {
@@ -793,7 +1099,7 @@ class StoreRepository(
                             val prodName = pSnap.getString("nameEn")?.take(140).orEmpty().ifBlank { "Product" }
 
                             tx.update(
-                                db.collection("products").document(prodId),
+                                database.collection("products").document(prodId),
                                 mapOf(
                                     "stockCount" to newStock,
                                     "soldCount" to newSold,
@@ -804,7 +1110,7 @@ class StoreRepository(
                                 .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                                 .take(120)
                             tx.set(
-                                db.collection("inventory_movements").document(movId),
+                                database.collection("inventory_movements").document(movId),
                                 mapOf(
                                     "productId" to prodId,
                                     "productName" to prodName,
@@ -864,6 +1170,13 @@ class StoreRepository(
         discountInr: Long,
         paymentMethod: String
     ): Result<OfflineSale> {
+        val database = db ?: return LocalFallbackStore.recordOfflineSale(
+            customerName = customerName,
+            customerPhone = customerPhone,
+            lineItems = lineItems,
+            discountInr = discountInr,
+            paymentMethod = paymentMethod
+        )
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (lineItems.isEmpty()) return Result.failure(IllegalArgumentException("Add at least one item"))
         val saleId = "sale_${UUID.randomUUID().toString().replace("-", "").take(16)}"
@@ -871,13 +1184,12 @@ class StoreRepository(
         val catalogProductIds = lineItems.map { it.productId }.filter { it.isNotBlank() }.distinct()
 
         return try {
-            val savedSale = db.runTransaction { tx ->
-                // 1. ALL READS FIRST
+            val savedSale = database.runTransaction { tx ->
                 val prodSnaps = catalogProductIds.associateWith { id ->
-                    tx.get(db.collection("products").document(id))
+                    tx.get(database.collection("products").document(id))
                 }
                 val costSnaps = catalogProductIds.associateWith { id ->
-                    tx.get(db.collection("product_costs").document(id))
+                    tx.get(database.collection("product_costs").document(id))
                 }
 
                 val qtyByProduct = lineItems
@@ -923,7 +1235,6 @@ class StoreRepository(
                     0L
                 }
 
-                // 2. WRITES
                 qtyByProduct.forEach { (prodId, reqQty) ->
                     val pSnap = prodSnaps.getValue(prodId)
                     val prevStock = pSnap.getLong("stockCount") ?: 0L
@@ -932,7 +1243,7 @@ class StoreRepository(
                     val pName = pSnap.getString("nameEn")?.take(140).orEmpty().ifBlank { "Product" }
 
                     tx.update(
-                        db.collection("products").document(prodId),
+                        database.collection("products").document(prodId),
                         mapOf(
                             "stockCount" to newStock,
                             "soldCount" to (prevSold + reqQty),
@@ -943,7 +1254,7 @@ class StoreRepository(
                         .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                         .take(120)
                     tx.set(
-                        db.collection("inventory_movements").document(movId),
+                        database.collection("inventory_movements").document(movId),
                         mapOf(
                             "productId" to prodId,
                             "productName" to pName,
@@ -993,7 +1304,7 @@ class StoreRepository(
                     "createdAt" to FieldValue.serverTimestamp()
                 ).filterValues { it != null }
 
-                tx.set(db.collection("offline_sales").document(saleId), salePayload)
+                tx.set(database.collection("offline_sales").document(saleId), salePayload)
 
                 OfflineSale(
                     id = saleId,
@@ -1023,23 +1334,27 @@ class StoreRepository(
         }
     }
 
-    fun observeOfflineSalesForOwner(): Flow<List<OfflineSale>> =
-        db.collection("offline_sales")
+    fun observeOfflineSalesForOwner(): Flow<List<OfflineSale>> {
+        val database = db ?: return LocalFallbackStore.observeOfflineSales()
+        return database.collection("offline_sales")
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toOfflineSaleOrNull() } }
             .catch { e ->
                 handleFirestoreError(e, OperationType.LIST, "offline_sales")
                 throw e
             }
+    }
 
-    fun observeExpensesForOwner(): Flow<List<Expense>> =
-        db.collection("expenses")
+    fun observeExpensesForOwner(): Flow<List<Expense>> {
+        val database = db ?: return LocalFallbackStore.observeExpenses()
+        return database.collection("expenses")
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toExpenseOrNull() } }
             .catch { e ->
                 handleFirestoreError(e, OperationType.LIST, "expenses")
                 throw e
             }
+    }
 
     suspend fun addExpense(
         title: String,
@@ -1047,6 +1362,7 @@ class StoreRepository(
         amountInr: Long,
         notes: String
     ): Result<String> {
+        val database = db ?: return LocalFallbackStore.addExpense(title, category, amountInr, notes)
         val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val cleanTitle = title.trim().take(140)
         if (cleanTitle.length < 2) {
@@ -1064,7 +1380,7 @@ class StoreRepository(
         ).filterValues { it != null }
 
         return try {
-            db.collection("expenses").document(expId).set(payload).await()
+            database.collection("expenses").document(expId).set(payload).await()
             Result.success(expId)
         } catch (e: CancellationException) {
             throw e
@@ -1075,9 +1391,10 @@ class StoreRepository(
     }
 
     suspend fun deleteExpense(expenseId: String): Result<Unit> {
+        val database = db ?: return LocalFallbackStore.deleteExpense(expenseId)
         runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         return try {
-            db.collection("expenses").document(expenseId).delete().await()
+            database.collection("expenses").document(expenseId).delete().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -1087,14 +1404,16 @@ class StoreRepository(
         }
     }
 
-    fun observeInventoryMovementsForOwner(): Flow<List<InventoryMovement>> =
-        db.collection("inventory_movements")
+    fun observeInventoryMovementsForOwner(): Flow<List<InventoryMovement>> {
+        val database = db ?: return LocalFallbackStore.observeMovements()
+        return database.collection("inventory_movements")
             .snapshots()
             .map { snapshot -> snapshot.documents.mapNotNull { it.toInventoryMovementOrNull() } }
             .catch { e ->
                 handleFirestoreError(e, OperationType.LIST, "inventory_movements")
                 throw e
             }
+    }
 
     // --- Safe DocumentSnapshot Mappers using ServerTimestampBehavior.ESTIMATE ---
 

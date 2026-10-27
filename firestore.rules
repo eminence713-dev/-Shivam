@@ -110,7 +110,8 @@ service cloud.firestore {
     }
 
     match /store_settings/{configId} {
-      allow get: if isSignedIn() && configId == 'public_config';
+      // Public storefront header, address & delivery policy (zero customer PII)
+      allow get: if configId == 'public_config';
       allow list: if false;
 
       allow create: if isSignedIn() &&
@@ -180,7 +181,8 @@ service cloud.firestore {
     }
 
     function isCustomerAtomicOrderStockUpdate() {
-      return existing().isPublished == true &&
+      return isSignedIn() &&
+             existing().isPublished == true &&
              incoming().createdAt == existing().createdAt &&
              incoming().createdBy == existing().createdBy &&
              incoming().diff(existing()).affectedKeys().hasOnly(['stockCount', 'soldCount', 'lastOrderId', 'updatedAt']) &&
@@ -195,8 +197,9 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow get: if isSignedIn() && isValidId(productId) && ((resource != null && existing().isPublished == true) || isOwnerAdmin());
-      allow list: if isSignedIn() && (existing().isPublished == true || isOwnerToken());
+      // Published storefront products are publicly readable; drafts & non-existent IDs require owner auth
+      allow get: if isValidId(productId) && ((resource != null && existing().isPublished == true) || isOwnerAdmin());
+      allow list: if existing().isPublished == true || isOwnerToken();
 
       allow create: if isSignedIn() &&
                        isValidId(productId) &&
@@ -303,11 +306,18 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow get: if isSignedIn() && isValidId(orderId) && (resource == null || existing().customerId == request.auth.uid || isOwnerAdmin());
-      allow list: if isSignedIn() && (existing().customerId == request.auth.uid || isOwnerToken());
+      // Strict PII isolation: guest orders are readable ONLY by verified shop owner; signed-in orders only by their own UID or owner
+      allow get: if isSignedIn() &&
+                    isValidId(orderId) &&
+                    (resource == null ||
+                     (existing().customerId != 'guest' && existing().customerId == request.auth.uid) ||
+                     isOwnerAdmin());
 
-      allow create: if isSignedIn() &&
-                       isValidId(orderId) &&
+      allow list: if isSignedIn() &&
+                     ((existing().customerId != 'guest' && existing().customerId == request.auth.uid) ||
+                      isOwnerToken());
+
+      allow create: if isValidId(orderId) &&
                        incoming().keys().hasAll([
                          'orderReference', 'customerId', 'customerName', 'customerPhone',
                          'deliveryAddress', 'items', 'itemSummary', 'totalQuantity',
@@ -323,13 +333,20 @@ service cloud.firestore {
                          'orderStatus', 'stockDeducted', 'cancellationReason', 'invoiceNumber',
                          'createdAt', 'updatedAt'
                        ]) &&
-                       incoming().customerId == request.auth.uid &&
                        incoming().orderStatus == 'PENDING' &&
                        incoming().paymentStatus == 'PENDING' &&
                        incoming().discountInr == 0 &&
                        incoming().totalPayableInr == (incoming().subtotalInr + incoming().deliveryChargeInr) &&
-                       incoming().stockDeducted == true &&
-                       isValidOrder(incoming());
+                       isValidOrder(incoming()) &&
+                       (
+                         (isSignedIn() &&
+                          incoming().customerId != 'guest' &&
+                          incoming().customerId == request.auth.uid &&
+                          incoming().stockDeducted == true) ||
+                         (!isSignedIn() &&
+                          incoming().customerId == 'guest' &&
+                          incoming().stockDeducted == false)
+                       );
 
       allow update: if isSignedIn() &&
                        isValidId(orderId) &&
@@ -437,7 +454,8 @@ service cloud.firestore {
     }
 
     function isCustomerOrderMovement() {
-      return incoming().reason == 'ONLINE_ORDER' &&
+      return isSignedIn() &&
+             incoming().reason == 'ONLINE_ORDER' &&
              incoming().delta < 0 &&
              isValidId(incoming().referenceId) &&
              !exists(/databases/$(database)/documents/orders/$(incoming().referenceId)) &&

@@ -122,14 +122,12 @@ fun StoreTopBar(
     lang: AppLanguage,
     cartCount: Int,
     wishlistCount: Int = 0,
-    showOwnerButton: Boolean = false,
     isOwnerUnlocked: Boolean = false,
     pendingOwnerOrdersCount: Int = 0,
     onToggleLanguage: () -> Unit,
     onOpenWishlist: () -> Unit = {},
     onOpenCart: () -> Unit,
-    onOwnerClick: () -> Unit,
-    onAccountClick: () -> Unit = {}
+    onOwnerClick: () -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.primary,
@@ -154,7 +152,7 @@ fun StoreTopBar(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = if (lang == AppLanguage.HINDI) "कल्याणपुर, मोतिहारी • लाइव स्टोर" else "Kalyanpur, Motihari • Live Store",
+                    text = if (lang == AppLanguage.HINDI) "कल्याणपुर, मोतिहारी • सीधा ऑनलाइन ऑर्डर" else "Kalyanpur, Motihari • 1-Click Shop",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     maxLines = 1,
@@ -225,35 +223,23 @@ fun StoreTopBar(
                     )
                 }
             }
-            if (showOwnerButton) {
-                IconButton(
-                    onClick = onOwnerClick,
-                    modifier = Modifier.testTag("owner_access_button")
-                ) {
-                    BadgedBox(
-                        badge = {
-                            if (pendingOwnerOrdersCount > 0) {
-                                Badge { Text("$pendingOwnerOrdersCount") }
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = if (isOwnerUnlocked) Icons.Outlined.AdminPanelSettings else Icons.Outlined.Lock,
-                            contentDescription = stringResource(R.string.cd_owner_dashboard),
-                            tint = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    }
-                }
-            }
             IconButton(
-                onClick = onAccountClick,
-                modifier = Modifier.testTag("top_account_button")
+                onClick = onOwnerClick,
+                modifier = Modifier.testTag("owner_access_button")
             ) {
-                Icon(
-                    imageVector = Icons.Filled.AccountCircle,
-                    contentDescription = "Account & Sign Out",
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
+                BadgedBox(
+                    badge = {
+                        if (pendingOwnerOrdersCount > 0) {
+                            Badge { Text("$pendingOwnerOrdersCount") }
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (isOwnerUnlocked) Icons.Outlined.AdminPanelSettings else Icons.Outlined.Lock,
+                        contentDescription = stringResource(R.string.cd_owner_dashboard),
+                        tint = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                }
             }
         }
     }

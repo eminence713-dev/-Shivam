@@ -10,18 +10,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -31,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -45,6 +51,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,7 +83,6 @@ import com.example.data.model.Product
 import com.example.data.repository.LanguagePreferencesRepository
 import com.example.data.repository.StoreRepository
 import com.example.ui.auth.AuthManager
-import com.example.ui.auth.AuthScreen
 import com.example.ui.components.StoreTopBar
 import com.example.ui.screens.AdminDashboardHub
 import com.example.ui.screens.CartAndCheckoutTab
@@ -121,76 +128,77 @@ class MainActivity : ComponentActivity() {
 fun ShivamMartApp() {
     val context = LocalContext.current
     val appContext = context.applicationContext
-    val scope = rememberCoroutineScope()
+    val firebaseReady = remember(appContext) { AuthManager.isFirebaseAvailable(appContext) }
     val langPrefs = remember(appContext) { LanguagePreferencesRepository(appContext) }
-    val lang by langPrefs.languageFlow.collectAsStateWithLifecycle(initialValue = AppLanguage.HINDI)
+    val repository = remember(appContext) { StoreRepository(appContext) }
 
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    var currentUser by remember {
+        mutableStateOf<FirebaseUser?>(if (firebaseReady) Firebase.auth.currentUser else null)
+    }
 
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            currentUser = firebaseAuth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
+    DisposableEffect(firebaseReady) {
+        if (!firebaseReady) {
+            onDispose { }
+        } else {
+            val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+                currentUser = firebaseAuth.currentUser
+            }
+            Firebase.auth.addAuthStateListener(listener)
+            onDispose {
+                Firebase.auth.removeAuthStateListener(listener)
+            }
         }
     }
 
-    val signedInUser = currentUser
-    if (signedInUser == null) {
-        AuthScreen(
-            lang = lang,
-            onToggleLanguage = {
-                val next = if (lang == AppLanguage.ENGLISH) AppLanguage.HINDI else AppLanguage.ENGLISH
-                scope.launch { langPrefs.setLanguage(next) }
-            }
-        )
-    } else {
-        AuthenticatedShivamMartShell(
-            user = signedInUser,
-            langPrefs = langPrefs,
-            onSignOut = {
-                scope.launch { AuthManager.signOut(context) }
-            }
-        )
-    }
+    // Customers open directly into the Flipkart-style storefront with ZERO login wall!
+    ShivamMartStoreShell(
+        user = currentUser,
+        repository = repository,
+        langPrefs = langPrefs
+    )
 }
 
 @Composable
-private fun AuthenticatedShivamMartShell(
-    user: FirebaseUser,
-    langPrefs: LanguagePreferencesRepository,
-    onSignOut: () -> Unit
+private fun ShivamMartStoreShell(
+    user: FirebaseUser?,
+    repository: StoreRepository,
+    langPrefs: LanguagePreferencesRepository
 ) {
     val context = LocalContext.current
-    val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
-    val repository = remember(appContext) { StoreRepository(appContext) }
 
-    var isRegisteredAdminDoc by remember(user.uid) { mutableStateOf(false) }
-    val hasOwnerEmailToken = remember(user.uid, user.email, user.isEmailVerified) {
+    val uidKey = user?.uid.orEmpty()
+    var isRegisteredAdminDoc by remember(uidKey) { mutableStateOf(false) }
+    val hasOwnerEmailToken = remember(uidKey, user?.email, user?.isEmailVerified) {
         AuthManager.hasVerifiedOwnerToken(user)
     }
 
-    LaunchedEffect(user.uid, hasOwnerEmailToken) {
-        if (!hasOwnerEmailToken) {
-            isRegisteredAdminDoc = repository.isUserRegisteredAdmin(user.uid)
+    LaunchedEffect(uidKey, hasOwnerEmailToken) {
+        if (uidKey.isNotBlank() && !hasOwnerEmailToken) {
+            isRegisteredAdminDoc = repository.isUserRegisteredAdmin(uidKey)
+        } else {
+            isRegisteredAdminDoc = false
         }
     }
 
-    val isAuthorizedOwner = hasOwnerEmailToken || isRegisteredAdminDoc
+    val isCloudAuthorizedOwner = hasOwnerEmailToken || isRegisteredAdminDoc
+    // When cloud is configured, owner writes require verified owner Google auth; in CI passthrough mode, owner password alone unlocks local dashboard
+    val canAccessOwnerDashboard = if (repository.isCloudConfigured) {
+        isCloudAuthorizedOwner
+    } else {
+        true
+    }
 
     val storefrontVm: StorefrontViewModel = viewModel(
-        key = "shivam_mart_storefront_${user.uid}_${isAuthorizedOwner}",
+        key = "shivam_mart_storefront_${uidKey}_${isCloudAuthorizedOwner}",
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 return StorefrontViewModel(
                     repository = repository,
                     langPrefs = langPrefs,
-                    currentUserId = user.uid,
-                    isAuthorizedOwner = isAuthorizedOwner
+                    currentUserId = uidKey,
+                    isAuthorizedOwner = isCloudAuthorizedOwner
                 ) as T
             }
         }
@@ -211,18 +219,15 @@ private fun AuthenticatedShivamMartShell(
     val checkoutError by storefrontVm.checkoutError.collectAsStateWithLifecycle()
     val toastMessage by storefrontVm.toastMessage.collectAsStateWithLifecycle()
 
-    var activeTab by rememberSaveable(user.uid) { mutableStateOf(PrimaryTab.HOME) }
-    var selectedProductId by rememberSaveable(user.uid) { mutableStateOf<String?>(null) }
-    var confirmedOrderBanner by remember(user.uid) { mutableStateOf<CustomerOrder?>(null) }
-    var isOwnerUnlocked by rememberSaveable(user.uid) { mutableStateOf(isAuthorizedOwner) }
-    var showOwnerPasswordDialog by rememberSaveable(user.uid) { mutableStateOf(false) }
-    var showAccountSheetDialog by rememberSaveable(user.uid) { mutableStateOf(false) }
+    var activeTab by rememberSaveable { mutableStateOf(PrimaryTab.HOME) }
+    var selectedProductId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmedOrderBanner by remember { mutableStateOf<CustomerOrder?>(null) }
+    var isOwnerUnlocked by rememberSaveable { mutableStateOf(false) }
+    var showOwnerAccessDialog by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(isAuthorizedOwner) {
-        if (isAuthorizedOwner) {
-            isOwnerUnlocked = true
-        } else {
+    LaunchedEffect(canAccessOwnerDashboard) {
+        if (!canAccessOwnerDashboard && isOwnerUnlocked) {
             isOwnerUnlocked = false
             if (activeTab == PrimaryTab.OWNER_ADMIN) {
                 activeTab = PrimaryTab.HOME
@@ -238,52 +243,25 @@ private fun AuthenticatedShivamMartShell(
         }
     }
 
-    if (showOwnerPasswordDialog && isAuthorizedOwner) {
-        OwnerPasswordDialog(
+    if (showOwnerAccessDialog) {
+        OwnerAccessDialog(
             lang = lang,
-            onDismiss = { showOwnerPasswordDialog = false },
-            onVerifyPassword = { enteredPwd, onError ->
-                scope.launch {
-                    val valid = storefrontVm.verifyOwnerPassword(enteredPwd)
-                    if (valid) {
-                        isOwnerUnlocked = true
-                        showOwnerPasswordDialog = false
-                        selectedProductId = null
-                        confirmedOrderBanner = null
-                        activeTab = PrimaryTab.OWNER_ADMIN
-                    } else {
-                        onError(
-                            if (lang == AppLanguage.HINDI) {
-                                "गलत पासवर्ड! केवल दुकान मालिक के लिए अनुमति है।"
-                            } else {
-                                "Incorrect password! Access is restricted to the shop owner."
-                            }
-                        )
-                    }
-                }
-            }
-        )
-    }
-
-    if (showAccountSheetDialog) {
-        AccountProfileDialog(
-            user = user,
-            isAuthorizedOwner = isAuthorizedOwner,
-            lang = lang,
-            onDismiss = { showAccountSheetDialog = false },
-            onOpenOwnerPanel = {
-                showAccountSheetDialog = false
-                if (isOwnerUnlocked) {
-                    selectedProductId = null
-                    confirmedOrderBanner = null
-                    activeTab = PrimaryTab.OWNER_ADMIN
-                } else {
-                    showOwnerPasswordDialog = true
-                }
+            isCloudConfigured = repository.isCloudConfigured,
+            signedInUser = user,
+            isCloudAuthorizedOwner = isCloudAuthorizedOwner,
+            onDismiss = { showOwnerAccessDialog = false },
+            onVerifyPassword = { enteredPwd ->
+                storefrontVm.verifyOwnerPassword(enteredPwd)
             },
-            onSignOut = {
-                showAccountSheetDialog = false
-                onSignOut()
+            onSignOutAccount = {
+                scope.launch { AuthManager.signOut(context) }
+            },
+            onUnlockedSuccess = {
+                isOwnerUnlocked = true
+                showOwnerAccessDialog = false
+                selectedProductId = null
+                confirmedOrderBanner = null
+                activeTab = PrimaryTab.OWNER_ADMIN
             }
         )
     }
@@ -308,7 +286,7 @@ private fun AuthenticatedShivamMartShell(
         add(NavDest(PrimaryTab.CATALOG, AppStrings.navCategories.get(lang), Icons.Filled.Category))
         add(NavDest(PrimaryTab.CART, AppStrings.navCart.get(lang), Icons.Filled.ShoppingCart, totalCartCount))
         add(NavDest(PrimaryTab.MY_ORDERS, AppStrings.navOrders.get(lang), Icons.AutoMirrored.Filled.ReceiptLong))
-        if (isAuthorizedOwner && isOwnerUnlocked) {
+        if (isOwnerUnlocked && canAccessOwnerDashboard) {
             add(
                 NavDest(
                     tab = PrimaryTab.OWNER_ADMIN,
@@ -333,8 +311,7 @@ private fun AuthenticatedShivamMartShell(
                     lang = lang,
                     cartCount = totalCartCount,
                     wishlistCount = wishlistIds.size,
-                    showOwnerButton = isAuthorizedOwner,
-                    isOwnerUnlocked = isOwnerUnlocked,
+                    isOwnerUnlocked = isOwnerUnlocked && canAccessOwnerDashboard,
                     pendingOwnerOrdersCount = pendingOwnerOrdersCount,
                     onToggleLanguage = { storefrontVm.toggleLanguage() },
                     onOpenWishlist = {
@@ -349,17 +326,14 @@ private fun AuthenticatedShivamMartShell(
                         activeTab = PrimaryTab.CART
                     },
                     onOwnerClick = {
-                        if (isAuthorizedOwner) {
-                            if (isOwnerUnlocked) {
-                                selectedProductId = null
-                                confirmedOrderBanner = null
-                                activeTab = PrimaryTab.OWNER_ADMIN
-                            } else {
-                                showOwnerPasswordDialog = true
-                            }
+                        if (isOwnerUnlocked && canAccessOwnerDashboard) {
+                            selectedProductId = null
+                            confirmedOrderBanner = null
+                            activeTab = PrimaryTab.OWNER_ADMIN
+                        } else {
+                            showOwnerAccessDialog = true
                         }
-                    },
-                    onAccountClick = { showAccountSheetDialog = true }
+                    }
                 )
             },
             floatingActionButton = {
@@ -542,7 +516,7 @@ private fun AuthenticatedShivamMartShell(
                                 cartItems = cartItems,
                                 latestProducts = liveProducts,
                                 settings = settings,
-                                defaultCustomerName = user.displayName.orEmpty(),
+                                defaultCustomerName = "",
                                 isPlacingOrder = isPlacingOrder,
                                 checkoutError = checkoutError,
                                 lang = lang,
@@ -569,9 +543,9 @@ private fun AuthenticatedShivamMartShell(
                                 lang = lang
                             )
                         }
-                        activeTab == PrimaryTab.OWNER_ADMIN && isAuthorizedOwner && isOwnerUnlocked -> {
+                        activeTab == PrimaryTab.OWNER_ADMIN && isOwnerUnlocked && canAccessOwnerDashboard -> {
                             val adminVm: AdminViewModel = viewModel(
-                                key = "shivam_mart_admin_${user.uid}",
+                                key = "shivam_mart_admin_${uidKey.ifBlank { "local_owner" }}",
                                 factory = object : ViewModelProvider.Factory {
                                     @Suppress("UNCHECKED_CAST")
                                     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -601,153 +575,174 @@ private fun AuthenticatedShivamMartShell(
 }
 
 @Composable
-private fun AccountProfileDialog(
-    user: FirebaseUser,
-    isAuthorizedOwner: Boolean,
+private fun OwnerAccessDialog(
     lang: AppLanguage,
+    isCloudConfigured: Boolean,
+    signedInUser: FirebaseUser?,
+    isCloudAuthorizedOwner: Boolean,
     onDismiss: () -> Unit,
-    onOpenOwnerPanel: () -> Unit,
-    onSignOut: () -> Unit
+    onVerifyPassword: suspend (String) -> Boolean,
+    onSignOutAccount: () -> Unit,
+    onUnlockedSuccess: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var isPasswordVerified by remember { mutableStateOf(false) }
+    var isSigningInOwner by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Automatically proceed once password is verified and cloud owner authorization is active (or local mode)
+    LaunchedEffect(isPasswordVerified, isCloudConfigured, isCloudAuthorizedOwner) {
+        if (isPasswordVerified && (!isCloudConfigured || isCloudAuthorizedOwner)) {
+            onUnlockedSuccess()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
             Icon(
-                imageVector = Icons.Filled.AccountCircle,
+                imageVector = if (isPasswordVerified) Icons.Filled.CloudSync else Icons.Filled.Lock,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary
             )
         },
         title = {
             Text(
-                text = if (lang == AppLanguage.HINDI) "मेरा खाता (My Account)" else "My Account",
+                text = if (!isPasswordVerified) {
+                    if (lang == AppLanguage.HINDI) "मालिक पैनल पासवर्ड" else "Shop Owner Login"
+                } else {
+                    if (lang == AppLanguage.HINDI) "लाइव क्लाउड सिंक (एक बार जोड़ें)" else "Connect Owner Cloud Account"
+                },
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!user.displayName.isNullOrBlank()) {
-                    Text(
-                        text = user.displayName.orEmpty(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Text(
-                    text = user.email.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                HorizontalDivider()
-                if (isAuthorizedOwner) {
+                if (!isPasswordVerified) {
                     Text(
                         text = if (lang == AppLanguage.HINDI) {
-                            "✔ सत्यापित दुकान मालिक खाता (Raju Kumar Gupta) — आप नया उत्पाद जोड़ सकते हैं और ऑनलाइन ऑर्डर मैनेज कर सकते हैं।"
+                            "ग्राहकों के लिए कोई लॉगिन ज़रूरी नहीं है। यह सेक्शन केवल दुकान मालिक (राजू कुमार गुप्ता) के लिए है:"
                         } else {
-                            "✔ Verified Shop Owner Account — Full cloud catalog & live orders access enabled."
+                            "Customers do not need to log in. This password is strictly for the Shop Owner:"
                         },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                    Button(
-                        onClick = onOpenOwnerPanel,
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = {
+                            password = it
+                            errorMessage = null
+                        },
+                        label = {
+                            Text(if (lang == AppLanguage.HINDI) "मालिक पासवर्ड" else "Owner Password")
+                        },
+                        singleLine = true,
+                        isError = errorMessage != null,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(
+                                    imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (showPassword) "Hide password" else "Show password"
+                                )
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("account_open_owner_button")
-                    ) {
-                        Text(if (lang == AppLanguage.HINDI) "मालिक डैशबोर्ड खोलें" else "Open Owner Dashboard")
-                    }
+                            .testTag("owner_password_input")
+                    )
                 } else {
                     Text(
                         text = if (lang == AppLanguage.HINDI) {
-                            "ग्राहक खाता सक्रिय है। आपके सभी ऑर्डर और बिल क्लाउड पर सुरक्षित रहते हैं।"
+                            "पासवर्ड सही है! सभी ग्राहकों के फोन में नया सामान लाइव दिखाने के लिए अपना मालिक Gmail अकाउंट (rajuguptas123@gmail.com या eminence713@gmail.com) चुनें:"
                         } else {
-                            "Customer shopping account active. Your orders and bills are synced to your account."
+                            "Password verified! Select your verified Owner Google account (rajuguptas123@gmail.com or eminence713@gmail.com) to publish live products to all customer phones:"
                         },
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                }
-                OutlinedButton(
-                    onClick = onSignOut,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("sign_out_button")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
-                    Text(
-                        text = if (lang == AppLanguage.HINDI) "  अकाउंट बदलें / लॉग आउट" else "  Switch Account / Sign Out"
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(if (lang == AppLanguage.HINDI) "बंद करें" else "Close")
-            }
-        }
-    )
-}
 
-@Composable
-private fun OwnerPasswordDialog(
-    lang: AppLanguage,
-    onDismiss: () -> Unit,
-    onVerifyPassword: (String, (String) -> Unit) -> Unit
-) {
-    var password by remember { mutableStateOf("") }
-    var showPassword by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+                    if (signedInUser != null && !isCloudAuthorizedOwner) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = if (lang == AppLanguage.HINDI) {
+                                        "अभी ${signedInUser.email} जुड़ा है, जो मालिक खाता नहीं है।"
+                                    } else {
+                                        "Signed in as ${signedInUser.email}, which is not an authorized owner email."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                OutlinedButton(
+                                    onClick = onSignOutAccount,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (lang == AppLanguage.HINDI) "दूसरा अकाउंट चुनें" else "Switch Google Account")
+                                }
+                            }
+                        }
+                    }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                imageVector = Icons.Filled.Lock,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
-        },
-        title = {
-            Text(
-                text = if (lang == AppLanguage.HINDI) "मालिक पैनल पासवर्ड" else "Owner Dashboard Access",
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = if (lang == AppLanguage.HINDI) {
-                        "केवल दुकान मालिक के लिए। कृपया अपना पासवर्ड दर्ज करें:"
-                    } else {
-                        "For shop owner only. Enter your Owner Password to unlock:"
-                    },
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        errorMessage = null
-                    },
-                    label = {
-                        Text(if (lang == AppLanguage.HINDI) "मालिक पासवर्ड" else "Owner Password")
-                    },
-                    singleLine = true,
-                    isError = errorMessage != null,
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showPassword = !showPassword }) {
-                            Icon(
-                                imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showPassword) "Hide password" else "Show password"
+                    HorizontalDivider()
+
+                    Button(
+                        onClick = {
+                            if (isSigningInOwner) return@Button
+                            isSigningInOwner = true
+                            errorMessage = null
+                            scope.launch {
+                                val res = AuthManager.signInInteractiveWithGoogle(context)
+                                isSigningInOwner = false
+                                res.onFailure { err ->
+                                    if (err !is GetCredentialCancellationException) {
+                                        errorMessage = if (lang == AppLanguage.HINDI) {
+                                            "Google अकाउंट जुड़ नहीं सका। कृपया फोन में इंटरनेट और Gmail अकाउंट जांचें।"
+                                        } else {
+                                            "Could not sign in with Google. Please verify internet and Google account on device."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isSigningInOwner,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("owner_google_sign_in_button")
+                    ) {
+                        if (isSigningInOwner) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (lang == AppLanguage.HINDI) "जुड़ रहा है..." else "Connecting...")
+                        } else {
+                            Icon(Icons.Filled.AccountCircle, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (lang == AppLanguage.HINDI) {
+                                    "मालिक Google अकाउंट जोड़ें"
+                                } else {
+                                    "Connect Owner Google Account"
+                                }
                             )
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("owner_password_input")
-                )
+                    }
+                }
+
                 if (errorMessage != null) {
                     Text(
                         text = errorMessage.orEmpty(),
@@ -759,17 +754,35 @@ private fun OwnerPasswordDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    if (password.isBlank()) {
-                        errorMessage = if (lang == AppLanguage.HINDI) "कृपया पासवर्ड लिखें।" else "Please enter password."
-                    } else {
-                        onVerifyPassword(password) { err -> errorMessage = err }
-                    }
-                },
-                modifier = Modifier.testTag("owner_password_submit_button")
-            ) {
-                Text(if (lang == AppLanguage.HINDI) "खोलें (Unlock)" else "Unlock")
+            if (!isPasswordVerified) {
+                Button(
+                    onClick = {
+                        if (password.isBlank()) {
+                            errorMessage = if (lang == AppLanguage.HINDI) "कृपया पासवर्ड लिखें।" else "Please enter password."
+                        } else {
+                            scope.launch {
+                                val valid = onVerifyPassword(password)
+                                if (valid) {
+                                    errorMessage = null
+                                    if (!isCloudConfigured || isCloudAuthorizedOwner) {
+                                        onUnlockedSuccess()
+                                    } else {
+                                        isPasswordVerified = true
+                                    }
+                                } else {
+                                    errorMessage = if (lang == AppLanguage.HINDI) {
+                                        "गलत पासवर्ड! केवल दुकान मालिक के लिए अनुमति है।"
+                                    } else {
+                                        "Incorrect password! Access is restricted to the shop owner."
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.testTag("owner_password_submit_button")
+                ) {
+                    Text(if (lang == AppLanguage.HINDI) "खोलें (Unlock)" else "Unlock")
+                }
             }
         },
         dismissButton = {
@@ -777,7 +790,7 @@ private fun OwnerPasswordDialog(
                 onClick = onDismiss,
                 modifier = Modifier.testTag("owner_password_cancel_button")
             ) {
-                Text(if (lang == AppLanguage.HINDI) "रद्द करें" else "Cancel")
+                Text(if (lang == AppLanguage.HINDI) "बंद करें" else "Cancel")
             }
         },
         modifier = Modifier.testTag("owner_password_dialog")

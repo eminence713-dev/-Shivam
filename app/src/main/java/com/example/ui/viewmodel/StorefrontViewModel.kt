@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.AppLanguage
 import com.example.data.model.CartItem
 import com.example.data.model.CustomerOrder
+import com.example.data.model.DemoCatalog
 import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethodType
 import com.example.data.model.Product
@@ -18,7 +19,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -49,7 +52,7 @@ class StorefrontViewModel(
 ) : ViewModel() {
 
     val language: StateFlow<AppLanguage> = langPrefs.languageFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), AppLanguage.ENGLISH)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), AppLanguage.HINDI)
 
     val wishlistIds: StateFlow<Set<String>> = langPrefs.wishlistIdsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
@@ -61,23 +64,52 @@ class StorefrontViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), StoreSettings())
 
-    val publishedProductsState: StateFlow<UiState<List<Product>>> = repository.observePublishedProducts()
-        .map<List<Product>, UiState<List<Product>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAtMillis })
+    val publishedProductsState: StateFlow<UiState<List<Product>>> = combine(
+        repository.observePublishedProducts(),
+        repository.observeHasCloudStoreConfig()
+    ) { cloudProducts, hasCloudConfig ->
+        val displayList = if (cloudProducts.isNotEmpty() || hasCloudConfig) {
+            cloudProducts
+        } else {
+            // Day-0 preview catalog until shop owner signs in once to seed/publish cloud products
+            DemoCatalog.buildSeedEntries().map { it.product.copy(id = it.id) }
         }
+        UiState.Success(displayList.sortedByDescending { it.createdAtMillis }) as UiState<List<Product>>
+    }
         .catch { e ->
-            Log.w(TAG, "Error observing published products", e)
-            emit(UiState.Error(e.localizedMessage ?: "Unable to load store catalogue"))
+            Log.w(TAG, "Error observing published products, showing starter catalog", e)
+            val fallback = DemoCatalog.buildSeedEntries().map { it.product.copy(id = it.id) }
+            emit(UiState.Success(fallback))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
-    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeCustomerOrders(currentUserId)
-        .map<List<CustomerOrder>, UiState<List<CustomerOrder>>> { list ->
-            UiState.Success(list.sortedByDescending { it.createdAtMillis })
+    private val cloudOrdersFlow = if (currentUserId.isNotBlank() && currentUserId != "guest") {
+        repository.observeCustomerOrders(currentUserId)
+            .catch { e ->
+                Log.w(TAG, "Error observing cloud customer orders", e)
+                emit(emptyList())
+            }
+    } else {
+        flowOf(emptyList())
+    }
+
+    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = combine(
+        langPrefs.localCustomerOrdersFlow,
+        cloudOrdersFlow
+    ) { localOrders, cloudOrders ->
+        val byId = LinkedHashMap<String, CustomerOrder>()
+        // Cloud orders take precedence when signed in so live owner status updates appear automatically
+        cloudOrders.forEach { ord -> byId[ord.id] = ord }
+        localOrders.forEach { ord ->
+            if (!byId.containsKey(ord.id)) {
+                byId[ord.id] = ord
+            }
         }
+        UiState.Success(byId.values.sortedByDescending { it.createdAtMillis }) as UiState<List<CustomerOrder>>
+    }
         .catch { e ->
-            Log.w(TAG, "Error observing customer orders", e)
-            emit(UiState.Error(e.localizedMessage ?: "Unable to load your orders"))
+            Log.w(TAG, "Error combining customer orders", e)
+            emit(UiState.Success(emptyList()))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
@@ -289,7 +321,7 @@ class StorefrontViewModel(
         if (items.isEmpty()) return
 
         val orderDocId = activeCheckoutIdempotencyId
-            ?: "ord_${UUID.randomUUID().toString().replace("-", "").take(18)}".also {
+            ?: "ord_${UUID.randomUUID().toString().replace("-", "").take(20)}".also {
                 activeCheckoutIdempotencyId = it
             }
 
@@ -309,6 +341,7 @@ class StorefrontViewModel(
             _isPlacingOrder.value = false
             result.fold(
                 onSuccess = { confirmedOrder ->
+                    langPrefs.saveLocalCustomerOrder(confirmedOrder)
                     _lastConfirmedOrder.value = confirmedOrder
                     _cartItems.value = emptyList()
                     activeCheckoutIdempotencyId = null

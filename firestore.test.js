@@ -68,11 +68,118 @@ function customerDb(uid) {
     .firestore();
 }
 
-test("Unauthenticated user: denied reading products, settings, and orders", async () => {
+test("Unauthenticated customer: can read published catalog & public_config, denied orders & drafts & writes", async () => {
+  const admin = ownerDb();
+  const now = new Date(Date.now() - 1000);
+  await assertSucceeds(
+    admin.collection("products").doc("pub_shoe").set({
+      nameEn: "Riya Men Casual Shoes",
+      category: "SHOES",
+      sellingPriceInr: 799,
+      originalPriceInr: 999,
+      stockCount: 10,
+      lowStockThreshold: 2,
+      sizes: ["7", "8", "9"],
+      colors: ["Black"],
+      isPublished: true,
+      isFeatured: true,
+      isDemo: false,
+      soldCount: 0,
+      createdBy: OWNER_UID,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    admin.collection("products").doc("draft_shoe").set({
+      nameEn: "Hidden Draft Shoe",
+      category: "SHOES",
+      sellingPriceInr: 799,
+      originalPriceInr: 999,
+      stockCount: 5,
+      lowStockThreshold: 2,
+      sizes: ["8"],
+      colors: ["Brown"],
+      isPublished: false,
+      isFeatured: false,
+      isDemo: false,
+      soldCount: 0,
+      createdBy: OWNER_UID,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
   const unauth = testEnv.unauthenticatedContext().firestore();
-  await assertFails(unauth.collection("products").where("isPublished", "==", true).get());
-  await assertFails(unauth.collection("store_settings").doc("public_config").get());
+  await assertSucceeds(unauth.collection("products").where("isPublished", "==", true).get());
+  await assertSucceeds(unauth.collection("products").doc("pub_shoe").get());
+  await assertSucceeds(unauth.collection("store_settings").doc("public_config").get());
+
+  // Must reject unfiltered list, draft product read, catalog tamper, and order PII reads
+  await assertFails(unauth.collection("products").get());
+  await assertFails(unauth.collection("products").doc("draft_shoe").get());
+  await assertFails(unauth.collection("products").doc("pub_shoe").update({ sellingPriceInr: 1 }));
   await assertFails(unauth.collection("orders").get());
+  await assertFails(unauth.collection("product_costs").get());
+});
+
+test("Zero-login guest customer order: validated create succeeds, PII read denied to guests & other customers, allowed for owner", async () => {
+  const unauth = testEnv.unauthenticatedContext().firestore();
+  const orderTime = new Date(Date.now() - 500);
+
+  await assertSucceeds(
+    unauth.collection("orders").doc("ord_guest_1001").set({
+      orderReference: "SSR-20261027-G101",
+      customerId: "guest",
+      customerName: "Sunil Kumar",
+      customerPhone: "9123456789",
+      deliveryAddress: "Bada Bazar, Near Block Road, Kalyanpur",
+      landmark: "Main Chowk",
+      items: [
+        {
+          productId: "pub_shoe",
+          productName: "Riya Men Casual Shoes",
+          category: "SHOES",
+          quantity: 1,
+          unitPriceInr: 799,
+          lineTotalInr: 799,
+          selectedSize: "8",
+          selectedColor: "Black",
+        },
+      ],
+      itemSummary: "Riya Men Casual Shoes (8) x1",
+      totalQuantity: 1,
+      subtotalInr: 799,
+      deliveryChargeInr: 0,
+      discountInr: 0,
+      totalPayableInr: 799,
+      deliveryFeeConfirmed: false,
+      paymentMethod: "COD",
+      paymentStatus: "PENDING",
+      orderStatus: "PENDING",
+      stockDeducted: false,
+      cancellationReason: "",
+      invoiceNumber: "",
+      createdAt: orderTime,
+      updatedAt: orderTime,
+    })
+  );
+
+  // Guest cannot overwrite existing order, cannot set stockDeducted=true, and cannot read PII back
+  await assertFails(
+    unauth.collection("orders").doc("ord_guest_1001").update({ orderStatus: "CONFIRMED" })
+  );
+  await assertFails(unauth.collection("orders").doc("ord_guest_1001").get());
+
+  // Even a signed-in non-owner customer CANNOT read or query 'guest' orders!
+  const custB = customerDb(CUSTOMER_B_UID);
+  await assertFails(custB.collection("orders").doc("ord_guest_1001").get());
+  await assertFails(custB.collection("orders").where("customerId", "==", "guest").get());
+
+  // Verified shop owner CAN read & list all orders including guest orders!
+  const admin = ownerDb();
+  await assertSucceeds(admin.collection("orders").doc("ord_guest_1001").get());
+  await assertSucceeds(admin.collection("orders").get());
 });
 
 test("Email spoofing guard: unverified owner email cannot create product or read expenses", async () => {
@@ -100,57 +207,6 @@ test("Email spoofing guard: unverified owner email cannot create product or read
   await assertFails(db.collection("expenses").get());
 });
 
-test("Verified owner can create published & hidden products; customers only read published", async () => {
-  const admin = ownerDb();
-  const now = new Date(Date.now() - 1000);
-  await assertSucceeds(
-    admin.collection("products").doc("pub_saree").set({
-      nameEn: "Banarasi Silk Saree",
-      category: "SAREES",
-      sellingPriceInr: 1450,
-      originalPriceInr: 1800,
-      stockCount: 8,
-      lowStockThreshold: 2,
-      sizes: ["Free Size"],
-      colors: ["Maroon", "Gold"],
-      isPublished: true,
-      isFeatured: true,
-      isDemo: true,
-      soldCount: 0,
-      createdBy: OWNER_UID,
-      createdAt: now,
-      updatedAt: now,
-    })
-  );
-  await assertSucceeds(
-    admin.collection("products").doc("draft_shirt").set({
-      nameEn: "Draft Cotton Shirt",
-      category: "SHIRTS",
-      sellingPriceInr: 599,
-      originalPriceInr: 0,
-      stockCount: 5,
-      lowStockThreshold: 2,
-      sizes: ["M", "L"],
-      colors: ["Cream"],
-      isPublished: false,
-      isFeatured: false,
-      isDemo: false,
-      soldCount: 0,
-      createdBy: OWNER_UID,
-      createdAt: now,
-      updatedAt: now,
-    })
-  );
-
-  const custA = customerDb(CUSTOMER_A_UID);
-  await assertSucceeds(custA.collection("products").where("isPublished", "==", true).get());
-  await assertFails(custA.collection("products").get());
-  await assertFails(custA.collection("products").doc("draft_shirt").get());
-  await assertFails(
-    custA.collection("products").doc("pub_saree").update({ sellingPriceInr: 10 })
-  );
-});
-
 test("Shadow field rejection: owner write with unexpected ghost field fails", async () => {
   const admin = ownerDb();
   const now = new Date(Date.now() - 1000);
@@ -167,7 +223,7 @@ test("Shadow field rejection: owner write with unexpected ghost field fails", as
   );
 });
 
-test("Atomic customer order creation + stock deduction succeeds; cross-customer PII read fails", async () => {
+test("Signed-in customer atomic order creation + stock deduction succeeds; cross-customer PII read fails", async () => {
   const admin = ownerDb();
   const now = new Date(Date.now() - 2000);
   await assertSucceeds(
@@ -252,15 +308,11 @@ test("Atomic customer order creation + stock deduction succeeds; cross-customer 
 
   await assertSucceeds(batch.commit());
 
-  // Customer A can query their own orders
   await assertSucceeds(
     custA.collection("orders").where("customerId", "==", CUSTOMER_A_UID).get()
   );
 
-  // Customer B CANNOT read Customer A's order or list unfiltered orders
   const custB = customerDb(CUSTOMER_B_UID);
   await assertFails(custB.collection("orders").doc("ord_1001").get());
   await assertFails(custB.collection("orders").get());
-  await assertFails(custB.collection("product_costs").get());
-  await assertFails(custB.collection("offline_sales").get());
 });

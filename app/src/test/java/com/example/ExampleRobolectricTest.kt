@@ -3,6 +3,8 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.CartItem
+import com.example.data.model.CustomerOrder
+import com.example.data.model.OrderLineItem
 import com.example.data.model.Product
 import com.example.data.repository.LanguagePreferencesRepository
 import kotlinx.coroutines.flow.first
@@ -34,7 +36,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `owner password verifies default and wishlist toggles cleanly`() = runBlocking {
+    fun `owner password verifies default, wishlist toggles, and local guest order persists`() = runBlocking {
         val langPrefs = LanguagePreferencesRepository(context)
         assertTrue(langPrefs.verifyOwnerPassword(LanguagePreferencesRepository.DEFAULT_OWNER_PASSWORD))
         assertFalse(langPrefs.verifyOwnerPassword("wrong_pass"))
@@ -46,6 +48,31 @@ class ExampleRobolectricTest {
         val addedSecondToggle = langPrefs.toggleWishlist("demo_saree_banarasi")
         assertFalse(addedSecondToggle)
         assertFalse("demo_saree_banarasi" in langPrefs.wishlistIdsFlow.first())
+
+        val sampleOrder = CustomerOrder(
+            id = "ord_local_test_1",
+            orderReference = "SSR-20261027-TEST1",
+            customerId = "guest",
+            customerName = "Ramesh Prasad",
+            customerPhone = "9876543210",
+            deliveryAddress = "Bada Bazar, Kalyanpur",
+            lineItems = listOf(
+                OrderLineItem(
+                    productId = "demo_saree_banarasi",
+                    productName = "Banarasi Art Silk Festive Saree",
+                    quantity = 1L,
+                    unitPriceInr = 1150L,
+                    lineTotalInr = 1150L
+                )
+            ),
+            itemSummary = "Banarasi Art Silk Festive Saree x1",
+            totalQuantity = 1L,
+            subtotalInr = 1150L,
+            totalPayableInr = 1150L
+        )
+        langPrefs.saveLocalCustomerOrder(sampleOrder)
+        val savedOrders = langPrefs.localCustomerOrdersFlow.first()
+        assertTrue(savedOrders.any { it.id == "ord_local_test_1" && it.orderReference == "SSR-20261027-TEST1" })
     }
 
     @Test
