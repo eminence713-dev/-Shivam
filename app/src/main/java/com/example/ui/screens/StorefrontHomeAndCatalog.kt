@@ -30,31 +30,42 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.DryCleaning
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Hiking
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,12 +79,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.model.AppLanguage
@@ -83,8 +97,10 @@ import com.example.data.model.StoreSettings
 import com.example.ui.components.JharokhaGoldDivider
 import com.example.ui.components.ProductGridCard
 import com.example.ui.components.ProductVisualImage
+import com.example.ui.components.ShivamAssuredBadge
 import com.example.ui.theme.AntiqueGold
 import com.example.ui.theme.DeepSindoor
+import com.example.ui.theme.VerifiedGreen
 import com.example.ui.theme.WhatsAppGreen
 import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.UiState
@@ -92,14 +108,29 @@ import com.example.util.AppStrings
 import com.example.util.WhatsAppHelper
 import com.example.util.formatInr
 
+private fun categoryIcon(cat: ProductCategory): ImageVector = when (cat) {
+    ProductCategory.SAREES -> Icons.Filled.AutoAwesome
+    ProductCategory.KURTIS -> Icons.Filled.DryCleaning
+    ProductCategory.LADIES_FROCKS -> Icons.Filled.WorkspacePremium
+    ProductCategory.SHIRTS,
+    ProductCategory.TSHIRTS,
+    ProductCategory.JEANS,
+    ProductCategory.TROUSERS -> Icons.Filled.Checkroom
+    ProductCategory.SHOES,
+    ProductCategory.SANDALS,
+    ProductCategory.SLIPPERS -> Icons.Filled.Hiking
+}
+
 @Composable
 fun StorefrontHomeTab(
     settings: StoreSettings,
     productsState: UiState<List<Product>>,
+    wishlistIds: Set<String> = emptySet(),
     lang: AppLanguage,
     onSelectCategory: (ProductCategory?) -> Unit,
     onOpenSearchCatalog: (String) -> Unit,
     onOpenProduct: (Product) -> Unit,
+    onToggleWishlist: (Product) -> Unit = {},
     onQuickAdd: (Product) -> Unit
 ) {
     val context = LocalContext.current
@@ -108,15 +139,134 @@ fun StorefrontHomeTab(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Hero Banner + Search
+        // 1. Flipkart-Style Delivery Location Strip + Instant Search Bar
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (lang == AppLanguage.HINDI) {
+                                "डिलीवरी क्षेत्र: ${settings.deliveryCoverageHi}"
+                            } else {
+                                "Deliver to: ${settings.deliveryCoverageEn}"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Surface(
+                            color = VerifiedGreen.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) "लाइव सिंक ●" else "LIVE SYNC ●",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = VerifiedGreen,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = homeSearch,
+                        onValueChange = {
+                            homeSearch = it
+                            if (it.length >= 2) onOpenSearchCatalog(it)
+                        },
+                        placeholder = { Text(AppStrings.searchHint.get(lang)) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_search_input")
+                    )
+                }
+            }
+        }
+
+        // 2. Flipkart-Style Circular Category Icon Strip (All 10 Categories)
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(ProductCategory.entries) { cat ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .width(72.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelectCategory(cat) }
+                            .padding(vertical = 4.dp)
+                            .testTag("category_chip_${cat.name}")
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            border = BorderStroke(1.5.dp, AntiqueGold.copy(alpha = 0.65f)),
+                            modifier = Modifier.size(54.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = categoryIcon(cat),
+                                    contentDescription = cat.label(lang),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = cat.label(lang),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Festive Hero Banner
         item {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .clip(RoundedCornerShape(22.dp))
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(20.dp))
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.img_store_hero_1793076838918),
@@ -124,31 +274,43 @@ fun StorefrontHomeTab(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(195.dp)
                 )
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(195.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    DeepSindoor.copy(alpha = 0.55f),
-                                    DeepSindoor.copy(alpha = 0.90f)
+                                    DeepSindoor.copy(alpha = 0.50f),
+                                    DeepSindoor.copy(alpha = 0.92f)
                                 )
                             )
                         )
-                        .padding(18.dp)
+                        .padding(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.align(Alignment.BottomStart)
-                    ) {
+                    Column(modifier = Modifier.align(Alignment.BottomStart)) {
+                        Surface(
+                            color = AntiqueGold,
+                            contentColor = Color.White,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) "कल्याणपुर स्पेशल ऑफ़र" else "FESTIVE & DAILY DEALS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             text = if (lang == AppLanguage.HINDI) settings.storeNameHi else settings.storeNameEn,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 2
                         )
-                        Spacer(Modifier.height(4.dp))
                         val offerText = if (lang == AppLanguage.HINDI) settings.promoBannerHi else settings.promoBannerEn
                         if (offerText.isNotBlank()) {
                             Text(
@@ -158,7 +320,7 @@ fun StorefrontHomeTab(
                                 maxLines = 2
                             )
                         }
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
                                 onClick = { onSelectCategory(null) },
@@ -194,84 +356,7 @@ fun StorefrontHomeTab(
             }
         }
 
-        // 2. Quick Search Bar
-        item {
-            OutlinedTextField(
-                value = homeSearch,
-                onValueChange = {
-                    homeSearch = it
-                    if (it.length >= 2) onOpenSearchCatalog(it)
-                },
-                placeholder = { Text(AppStrings.searchHint.get(lang)) },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .testTag("home_search_input")
-            )
-        }
-
-        // 3. All 10 Category Shortcuts
-        item {
-            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (lang == AppLanguage.HINDI) "उत्पाद श्रेणियाँ (10)" else "Shop by Category (10)",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = AppStrings.viewProducts.get(lang),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier
-                            .clickable { onSelectCategory(null) }
-                            .padding(6.dp)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(ProductCategory.entries) { cat ->
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            border = BorderStroke(1.dp, AntiqueGold.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .clickable { onSelectCategory(cat) }
-                                .testTag("category_chip_${cat.name}")
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Checkroom,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = cat.label(lang),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item { JharokhaGoldDivider(modifier = Modifier.padding(horizontal = 24.dp)) }
-
-        // 4. Featured, New Arrivals & Popular Sections
+        // 4. Live Catalog Sections (Top Deals, New Arrivals, All Live Products 2-Column Feed)
         when (productsState) {
             is UiState.Loading -> {
                 item {
@@ -305,9 +390,9 @@ fun StorefrontHomeTab(
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = if (lang == AppLanguage.HINDI) {
-                                        "दुकानदार उत्पादों की समीक्षा कर प्रकाशित करेंगे। जानकारी के लिए व्हाट्सऐप पर संपर्क करें।"
+                                        "दुकानदार उत्पादों को जोड़ते ही वे यहाँ तुरंत लाइव दिखेंगे।"
                                     } else {
-                                        "The shop owner will review and publish available inventory shortly. Contact us on WhatsApp for enquiries."
+                                        "New items added by the shop owner appear here automatically in real time."
                                     },
                                     style = MaterialTheme.typography.bodyMedium
                                 )
@@ -315,39 +400,89 @@ fun StorefrontHomeTab(
                         }
                     }
                 } else {
-                    val featured = products.filter { it.isFeatured }.ifEmpty { products.take(4) }
+                    val topDeals = products
+                        .filter { it.discountPercent > 0 }
+                        .sortedByDescending { it.discountPercent }
+                        .take(6)
                     val newArrivals = products.take(6)
-                    val popularReal = products.filter { it.soldCount > 0L }.sortedByDescending { it.soldCount }.take(6)
 
-                    item {
-                        ProductHorizontalSection(
-                            title = AppStrings.featuredHeading.get(lang),
-                            items = featured,
-                            lang = lang,
-                            onOpenProduct = onOpenProduct,
-                            onQuickAdd = onQuickAdd
-                        )
+                    if (topDeals.isNotEmpty()) {
+                        item {
+                            ProductHorizontalSection(
+                                title = if (lang == AppLanguage.HINDI) "🔥 सबसे बड़ी बचत (Top Deals)" else "🔥 Top Deals & Discounts",
+                                items = topDeals,
+                                wishlistIds = wishlistIds,
+                                lang = lang,
+                                onOpenProduct = onOpenProduct,
+                                onToggleWishlist = onToggleWishlist,
+                                onQuickAdd = onQuickAdd
+                            )
+                        }
                     }
 
                     item {
                         ProductHorizontalSection(
                             title = AppStrings.newArrivalsHeading.get(lang),
                             items = newArrivals,
+                            wishlistIds = wishlistIds,
                             lang = lang,
                             onOpenProduct = onOpenProduct,
+                            onToggleWishlist = onToggleWishlist,
                             onQuickAdd = onQuickAdd
                         )
                     }
 
-                    if (popularReal.isNotEmpty()) {
-                        item {
-                            ProductHorizontalSection(
-                                title = AppStrings.popularHeading.get(lang),
-                                items = popularReal,
-                                lang = lang,
-                                onOpenProduct = onOpenProduct,
-                                onQuickAdd = onQuickAdd
+                    item { JharokhaGoldDivider(modifier = Modifier.padding(horizontal = 24.dp)) }
+
+                    // Full Flipkart-style 2-Column Live Store Feed right on Home!
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) {
+                                    "सभी लाइव उत्पाद (${products.size})"
+                                } else {
+                                    "All Live Shop Products (${products.size})"
+                                },
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.primary
                             )
+                            Text(
+                                text = AppStrings.viewProducts.get(lang),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.clickable { onSelectCategory(null) }
+                            )
+                        }
+                    }
+
+                    val rows = products.chunked(2)
+                    items(rows, key = { pair -> pair.joinToString("_") { it.id } }) { rowItems ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowItems.forEach { prod ->
+                                ProductGridCard(
+                                    product = prod,
+                                    lang = lang,
+                                    isWishlisted = prod.id in wishlistIds,
+                                    onToggleWishlist = { onToggleWishlist(prod) },
+                                    onClick = { onOpenProduct(prod) },
+                                    onQuickAdd = { onQuickAdd(prod) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (rowItems.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -394,16 +529,6 @@ fun StorefrontHomeTab(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    val paymentModes = buildList {
-                        if (settings.codEnabled) add(if (lang == AppLanguage.HINDI) "कैश ऑन डिलीवरी (COD)" else "Cash on Delivery (COD)")
-                        if (settings.isUpiConfiguredAndActive) add("Verified UPI QR")
-                        add("WhatsApp Order Assistance")
-                    }.joinToString(" • ")
-                    Text(
-                        text = "Available Modes: $paymentModes",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
                 }
             }
         }
@@ -414,8 +539,10 @@ fun StorefrontHomeTab(
 private fun ProductHorizontalSection(
     title: String,
     items: List<Product>,
+    wishlistIds: Set<String>,
     lang: AppLanguage,
     onOpenProduct: (Product) -> Unit,
+    onToggleWishlist: (Product) -> Unit,
     onQuickAdd: (Product) -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -430,6 +557,8 @@ private fun ProductHorizontalSection(
                 ProductGridCard(
                     product = prod,
                     lang = lang,
+                    isWishlisted = prod.id in wishlistIds,
+                    onToggleWishlist = { onToggleWishlist(prod) },
                     onClick = { onOpenProduct(prod) },
                     onQuickAdd = { onQuickAdd(prod) },
                     modifier = Modifier.width(210.dp)
@@ -442,6 +571,8 @@ private fun ProductHorizontalSection(
 @Composable
 fun CatalogAndSearchTab(
     productsState: UiState<List<Product>>,
+    wishlistIds: Set<String> = emptySet(),
+    showWishlistOnly: Boolean = false,
     searchQuery: String,
     selectedCategory: ProductCategory?,
     sortOption: SortOption,
@@ -449,7 +580,9 @@ fun CatalogAndSearchTab(
     onSearchChange: (String) -> Unit,
     onSelectCategory: (ProductCategory?) -> Unit,
     onSelectSort: (SortOption) -> Unit,
+    onToggleShowWishlistOnly: (Boolean) -> Unit = {},
     onOpenProduct: (Product) -> Unit,
+    onToggleWishlist: (Product) -> Unit = {},
     onQuickAdd: (Product) -> Unit
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -486,8 +619,29 @@ fun CatalogAndSearchTab(
             ) {
                 item {
                     FilterChip(
-                        selected = selectedCategory == null,
-                        onClick = { onSelectCategory(null) },
+                        selected = showWishlistOnly,
+                        onClick = { onToggleShowWishlistOnly(!showWishlistOnly) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (showWishlistOnly) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                if (lang == AppLanguage.HINDI) "विशलिस्ट (${wishlistIds.size})" else "Wishlist (${wishlistIds.size})"
+                            )
+                        }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = selectedCategory == null && !showWishlistOnly,
+                        onClick = {
+                            onToggleShowWishlistOnly(false)
+                            onSelectCategory(null)
+                        },
                         label = { Text(AppStrings.allCategories.get(lang)) }
                     )
                 }
@@ -526,10 +680,11 @@ fun CatalogAndSearchTab(
                 }
                 is UiState.Success -> {
                     val q = searchQuery.trim().lowercase()
-                    val filtered = remember(productsState.data, q, selectedCategory, sortOption) {
+                    val filtered = remember(productsState.data, q, selectedCategory, sortOption, showWishlistOnly, wishlistIds) {
                         productsState.data
                             .filter { p ->
-                                (selectedCategory == null || p.categoryEnum() == selectedCategory) &&
+                                (!showWishlistOnly || p.id in wishlistIds) &&
+                                    (selectedCategory == null || p.categoryEnum() == selectedCategory) &&
                                     (q.isEmpty() ||
                                         p.nameEn.lowercase().contains(q) ||
                                         p.nameHi.lowercase().contains(q) ||
@@ -539,6 +694,7 @@ fun CatalogAndSearchTab(
                             .let { list ->
                                 when (sortOption) {
                                     SortOption.NEWEST -> list
+                                    SortOption.DISCOUNT_HIGH_LOW -> list.sortedByDescending { it.discountPercent }
                                     SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.sellingPriceInr }
                                     SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.sellingPriceInr }
                                 }
@@ -573,6 +729,7 @@ fun CatalogAndSearchTab(
                                 onClick = {
                                     onSearchChange("")
                                     onSelectCategory(null)
+                                    onToggleShowWishlistOnly(false)
                                 }
                             ) {
                                 Text(if (lang == AppLanguage.HINDI) "फ़िल्टर रीसेट करें" else "Reset Filters")
@@ -597,6 +754,8 @@ fun CatalogAndSearchTab(
                                 ProductGridCard(
                                     product = prod,
                                     lang = lang,
+                                    isWishlisted = prod.id in wishlistIds,
+                                    onToggleWishlist = { onToggleWishlist(prod) },
                                     onClick = { onOpenProduct(prod) },
                                     onQuickAdd = { onQuickAdd(prod) }
                                 )
@@ -614,8 +773,10 @@ fun CatalogAndSearchTab(
 fun ProductDetailScreen(
     product: Product,
     settings: StoreSettings,
+    isWishlisted: Boolean = false,
     lang: AppLanguage,
     onBack: () -> Unit,
+    onToggleWishlist: () -> Unit = {},
     onAddToCart: (Int, String, String) -> Unit,
     onBuyNow: (Int, String, String) -> Unit
 ) {
@@ -626,158 +787,260 @@ fun ProductDetailScreen(
     var quantity by remember(product.id) { mutableIntStateOf(1) }
     val maxQty = product.stockCount.toInt().coerceAtLeast(1)
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 28.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.testTag("detail_back_button")) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Text(
-                text = product.categoryEnum().label(lang),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 640.dp)
-                .align(Alignment.CenterHorizontally)
-                .padding(horizontal = 16.dp)
-        ) {
-            ProductVisualImage(
-                product = product,
-                lang = lang,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(4f / 3f)
-                    .clip(RoundedCornerShape(18.dp))
-            )
-        }
-
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Scrollable Product Content
         Column(
             modifier = Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .widthIn(max = 640.dp)
-                .align(Alignment.CenterHorizontally)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 16.dp)
         ) {
-            Text(
-                text = product.displayName(lang),
-                style = MaterialTheme.typography.headlineSmall
-            )
-
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = formatInr(product.sellingPriceInr),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                if (product.originalPriceInr > product.sellingPriceInr) {
-                    Text(
-                        text = formatInr(product.originalPriceInr),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textDecoration = TextDecoration.LineThrough
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("detail_back_button")) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
+                Text(
+                    text = product.categoryEnum().label(lang),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                ShivamAssuredBadge(lang = lang, modifier = Modifier.padding(end = 12.dp))
             }
 
-            Text(
-                text = if (product.isOutOfStock) {
-                    AppStrings.outOfStock.get(lang)
-                } else {
-                    "${AppStrings.inStock.get(lang)}: ${product.stockCount} pcs"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = if (product.isOutOfStock) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-            )
-
-            val desc = product.displayDescription(lang)
-            if (desc.isNotBlank()) {
-                Text(
-                    text = desc,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 640.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = 16.dp)
+            ) {
+                ProductVisualImage(
+                    product = product,
+                    lang = lang,
+                    isWishlisted = isWishlisted,
+                    onToggleWishlist = onToggleWishlist,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(18.dp))
                 )
             }
 
-            if (product.sizes.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 640.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
-                    text = if (lang == AppLanguage.HINDI) "साइज़ चुनें:" else "Select Size:",
-                    style = MaterialTheme.typography.titleSmall
+                    text = product.displayName(lang),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    product.sizes.forEach { sz ->
-                        FilterChip(
-                            selected = selectedSize == sz,
-                            onClick = { selectedSize = sz },
-                            label = { Text(sz) }
+
+                // Flipkart-style Special Price Block
+                if (product.discountPercent > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.LocalOffer,
+                            contentDescription = null,
+                            tint = VerifiedGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (lang == AppLanguage.HINDI) "विशेष दुकान मूल्य (Special Price)" else "Special Shop Price",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = VerifiedGreen,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
-            }
 
-            if (product.colors.isNotEmpty()) {
-                Text(
-                    text = if (lang == AppLanguage.HINDI) "रंग चुनें:" else "Select Colour:",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    product.colors.forEach { clr ->
-                        FilterChip(
-                            selected = selectedColor == clr,
-                            onClick = { selectedColor = clr },
-                            label = { Text(clr) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (product.discountPercent > 0) {
+                        Text(
+                            text = "↓${product.discountPercent}%",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = VerifiedGreen
                         )
                     }
-                }
-            }
-
-            // Quantity selector
-            if (!product.isOutOfStock) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (lang == AppLanguage.HINDI) "मात्रा (Qty):" else "Quantity:",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    IconButton(
-                        onClick = { if (quantity > 1) quantity-- },
-                        enabled = quantity > 1
-                    ) {
-                        Icon(Icons.Filled.Remove, contentDescription = "Decrease quantity")
+                    if (product.originalPriceInr > product.sellingPriceInr) {
+                        Text(
+                            text = formatInr(product.originalPriceInr),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough
+                        )
                     }
                     Text(
-                        text = "$quantity",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = formatInr(product.sellingPriceInr),
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp)
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    IconButton(
-                        onClick = { if (quantity < maxQty) quantity++ },
-                        enabled = quantity < maxQty
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Increase quantity")
+                }
+
+                Text(
+                    text = if (product.isOutOfStock) {
+                        AppStrings.outOfStock.get(lang)
+                    } else {
+                        "${AppStrings.inStock.get(lang)}: ${product.stockCount} pcs"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (product.isOutOfStock) MaterialTheme.colorScheme.error else VerifiedGreen
+                )
+
+                val desc = product.displayDescription(lang)
+                if (desc.isNotBlank()) {
+                    Text(
+                        text = desc,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (product.sizes.isNotEmpty()) {
+                    HorizontalDivider()
+                    Text(
+                        text = if (lang == AppLanguage.HINDI) "साइज़ चुनें (Select Size):" else "Select Size:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        product.sizes.forEach { sz ->
+                            FilterChip(
+                                selected = selectedSize == sz,
+                                onClick = { selectedSize = sz },
+                                label = { Text(sz) }
+                            )
+                        }
                     }
                 }
-            }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                if (product.colors.isNotEmpty()) {
+                    Text(
+                        text = if (lang == AppLanguage.HINDI) "रंग चुनें (Select Colour):" else "Select Colour:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        product.colors.forEach { clr ->
+                            FilterChip(
+                                selected = selectedColor == clr,
+                                onClick = { selectedColor = clr },
+                                label = { Text(clr) }
+                            )
+                        }
+                    }
+                }
+
+                if (!product.isOutOfStock) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (lang == AppLanguage.HINDI) "मात्रा (Qty):" else "Quantity:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        IconButton(
+                            onClick = { if (quantity > 1) quantity-- },
+                            enabled = quantity > 1
+                        ) {
+                            Icon(Icons.Filled.Remove, contentDescription = "Decrease quantity")
+                        }
+                        Text(
+                            text = "$quantity",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        IconButton(
+                            onClick = { if (quantity < maxQty) quantity++ },
+                            enabled = quantity < maxQty
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = "Increase quantity")
+                        }
+                    }
+                }
+
+                // Flipkart-style Delivery & Store Promise Box
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = if (lang == AppLanguage.HINDI) "✔ कैश ऑन डिलीवरी (COD) उपलब्ध" else "✔ Cash on Delivery (COD) Available",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (lang == AppLanguage.HINDI) {
+                                "📍 बड़ा बाज़ार, कल्याणपुर दुकान पर आसान साइज़ व रंग जांच सुविधा"
+                            } else {
+                                "📍 Easy size & colour check at Bada Bazar, Kalyanpur store"
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val msg = WhatsAppHelper.buildSingleProductMessage(
+                            settings = settings,
+                            product = product,
+                            quantity = quantity,
+                            size = selectedSize,
+                            color = selectedColor,
+                            lang = lang
+                        )
+                        WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
+                    },
+                    border = BorderStroke(1.5.dp, WhatsAppGreen),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WhatsAppGreen),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("product_whatsapp_button")
+                ) {
+                    Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(AppStrings.orderOnWhatsApp.get(lang))
+                }
+            }
+        }
+
+        // Sticky Flipkart-Style Dual Action Bar at Bottom
+        Surface(
+            tonalElevation = 8.dp,
+            shadowElevation = 8.dp,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
                 OutlinedButton(
                     onClick = { onAddToCart(quantity, selectedSize, selectedColor) },
                     enabled = !product.isOutOfStock,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)
@@ -785,42 +1048,25 @@ fun ProductDetailScreen(
                 ) {
                     Icon(Icons.Filled.AddShoppingCart, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(AppStrings.addToCart.get(lang))
+                    Text(AppStrings.addToCart.get(lang), fontWeight = FontWeight.Bold)
                 }
                 Button(
                     onClick = { onBuyNow(quantity, selectedSize, selectedColor) },
                     enabled = !product.isOutOfStock,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)
                         .testTag("buy_now_button")
                 ) {
-                    Text(AppStrings.buyNow.get(lang))
+                    Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(AppStrings.buyNow.get(lang), fontWeight = FontWeight.Bold)
                 }
-            }
-
-            OutlinedButton(
-                onClick = {
-                    val msg = WhatsAppHelper.buildSingleProductMessage(
-                        settings = settings,
-                        product = product,
-                        quantity = quantity,
-                        size = selectedSize,
-                        color = selectedColor,
-                        lang = lang
-                    )
-                    WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
-                },
-                border = BorderStroke(1.5.dp, WhatsAppGreen),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = WhatsAppGreen),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("product_whatsapp_button")
-            ) {
-                Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(AppStrings.orderOnWhatsApp.get(lang))
             }
         }
     }

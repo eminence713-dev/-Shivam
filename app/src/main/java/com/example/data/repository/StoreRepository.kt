@@ -1,16 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
-import androidx.room.withTransaction
-import com.example.data.local.CustomerOrderEntity
-import com.example.data.local.ExpenseEntity
-import com.example.data.local.InventoryMovementEntity
-import com.example.data.local.OfflineSaleEntity
-import com.example.data.local.ProductCostEntity
-import com.example.data.local.ProductEntity
-import com.example.data.local.ShivamMartDatabase
-import com.example.data.local.StoreCodec
-import com.example.data.local.StoreSettingsEntity
+import com.example.R
 import com.example.data.model.CartItem
 import com.example.data.model.CustomerOrder
 import com.example.data.model.DemoCatalog
@@ -23,11 +14,24 @@ import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethodType
 import com.example.data.model.PaymentStatus
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
 import com.example.data.model.ProductCost
 import com.example.data.model.StoreSettings
+import com.example.util.OperationType
+import com.example.util.handleFirestoreError
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,13 +39,22 @@ import java.util.TimeZone
 import java.util.UUID
 
 class StoreRepository(
-    private val database: ShivamMartDatabase
+    private val db: FirebaseFirestore,
+    private val auth: FirebaseAuth = Firebase.auth
 ) {
-    private val dao = database.storeDao()
-
-    constructor(context: Context) : this(ShivamMartDatabase.getInstance(context.applicationContext))
+    constructor(context: Context) : this(
+        db = FirebaseFirestore.getInstance(
+            context.applicationContext.getString(R.string.firestore_database_id)
+        ),
+        auth = Firebase.auth
+    )
 
     companion object {
+        val VERIFIED_OWNER_EMAILS = setOf(
+            "rajuguptas123@gmail.com",
+            "eminence713@gmail.com"
+        )
+
         fun currentEpochDay(): Long = System.currentTimeMillis() / 86_400_000L
 
         fun generateOrderReference(): String {
@@ -61,222 +74,435 @@ class StoreRepository(
         }
     }
 
-    suspend fun ensureInitialCatalogSeeded(prefs: LanguagePreferencesRepository? = null) {
-        val alreadySeeded = prefs?.isInitialCatalogSeeded() ?: false
-        if (!alreadySeeded && dao.countProducts() == 0) {
-            seedDemoProducts()
-            prefs?.markInitialCatalogSeeded()
-        } else if (!alreadySeeded) {
-            prefs?.markInitialCatalogSeeded()
+    private fun requireUid(): String =
+        checkNotNull(auth.currentUser?.uid) { "Please sign in with Google to continue." }
+
+    suspend fun isUserRegisteredAdmin(uid: String): Boolean {
+        if (uid.isBlank()) return false
+        return try {
+            val snap = db.collection("admins").document(uid).get().await()
+            snap.exists()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Seeds initial 10 starter items into Cloud Firestore ONLY when signed in as the verified shop owner
+     * and the cloud `/products` collection is completely empty.
+     */
+    suspend fun ensureInitialCatalogSeededForOwner() {
+        val user = auth.currentUser ?: return
+        val emailLower = user.email?.lowercase(Locale.US).orEmpty()
+        val isTokenOwner = user.isEmailVerified && emailLower in VERIFIED_OWNER_EMAILS
+        if (!isTokenOwner && !isUserRegisteredAdmin(user.uid)) return
+
+        try {
+            val existing = db.collection("products").limit(1).get().await()
+            if (existing.isEmpty) {
+                seedDemoProducts()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "products")
         }
     }
 
     fun observeStoreSettings(): Flow<StoreSettings> =
-        dao.observeSettings().map { entity -> entity?.toModel() ?: StoreSettings() }
+        db.collection("store_settings")
+            .document("public_config")
+            .snapshots()
+            .map { snap -> if (snap.exists()) snap.toStoreSettings() else StoreSettings() }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.GET, "store_settings/public_config")
+                throw e
+            }
 
-    suspend fun saveStoreSettings(settings: StoreSettings): Result<Unit> = try {
-        dao.upsertSettings(StoreSettingsEntity.fromModel(settings))
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun saveStoreSettings(settings: StoreSettings): Result<Unit> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        val docRef = db.collection("store_settings").document("public_config")
+        val payload = mapOf<String, Any?>(
+            "storeNameEn" to settings.storeNameEn.trim().ifBlank { "Shri Shivam Readymade & Riya Fancy Shoes Mart" }.take(150),
+            "storeNameHi" to settings.storeNameHi.trim().ifBlank { "श्री शिवम रेडीमेड एंड रिया फैंसी शूज़ मार्ट" }.take(150),
+            "ownerName" to settings.ownerName.trim().ifBlank { "Raju Kumar Gupta" }.take(100),
+            "phone" to settings.phone.trim().ifBlank { "9162685162" }.take(20),
+            "whatsappNumber" to settings.whatsappNumber.trim().ifBlank { "9162685162" }.take(20),
+            "email" to settings.email.trim().ifBlank { "rajuguptas123@gmail.com" }.take(120),
+            "addressEn" to settings.addressEn.trim().ifBlank { "Bada Bazar, Kalyanpur, Motihari, Bihar, India" }.take(250),
+            "addressHi" to settings.addressHi.trim().ifBlank { "बड़ा बाज़ार, कल्याणपुर, मोतिहारी, बिहार, भारत" }.take(250),
+            "promoBannerEn" to settings.promoBannerEn.trim().take(300),
+            "promoBannerHi" to settings.promoBannerHi.trim().take(300),
+            "deliveryCoverageEn" to settings.deliveryCoverageEn.trim().take(300),
+            "deliveryCoverageHi" to settings.deliveryCoverageHi.trim().take(300),
+            "deliveryChargeInr" to settings.deliveryChargeInr.coerceIn(0L, 10_000L),
+            "freeDeliveryThresholdInr" to settings.freeDeliveryThresholdInr.coerceIn(0L, 1_000_000L),
+            "minOrderAmountInr" to settings.minOrderAmountInr.coerceIn(0L, 1_000_000L),
+            "expectedDeliveryEn" to settings.expectedDeliveryEn.trim().take(300),
+            "expectedDeliveryHi" to settings.expectedDeliveryHi.trim().take(300),
+            "returnPolicyEn" to settings.returnPolicyEn.trim().take(600),
+            "returnPolicyHi" to settings.returnPolicyHi.trim().take(600),
+            "policiesConfirmed" to settings.policiesConfirmed,
+            "codEnabled" to settings.codEnabled,
+            "upiEnabled" to settings.upiEnabled,
+            "merchantUpiId" to settings.merchantUpiId.trim().take(100),
+            "merchantPayeeName" to settings.merchantPayeeName.trim().take(120),
+            "updatedBy" to uid,
+            "updatedAt" to FieldValue.serverTimestamp()
+        ).filterValues { it != null }
+
+        return try {
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                if (snap.exists()) {
+                    tx.update(docRef, payload)
+                } else {
+                    tx.set(docRef, payload)
+                }
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "store_settings/public_config")
+            Result.failure(e)
+        }
     }
 
     fun observePublishedProducts(): Flow<List<Product>> =
-        dao.observePublishedProducts().map { list -> list.map { it.toModel() } }
+        db.collection("products")
+            .whereEqualTo("isPublished", true)
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toProductOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "products")
+                throw e
+            }
 
     fun observeAllProductsForOwner(): Flow<List<Product>> =
-        dao.observeAllProducts().map { list -> list.map { it.toModel() } }
+        db.collection("products")
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toProductOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "products")
+                throw e
+            }
 
     fun observeProductCostsForOwner(): Flow<Map<String, ProductCost>> =
-        dao.observeProductCosts().map { list ->
-            list.map { it.toModel() }.associateBy { it.productId }
-        }
+        db.collection("product_costs")
+            .snapshots()
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { it.toProductCostOrNull() }.associateBy { it.productId }
+            }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "product_costs")
+                throw e
+            }
 
     suspend fun saveProductWithCost(
         product: Product,
         costPriceInr: Long,
         supplierNote: String = ""
     ): Result<String> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val isNew = product.id.isBlank()
         val productId = if (isNew) {
             "prod_${UUID.randomUUID().toString().replace("-", "").take(16)}"
         } else {
             product.id
         }
-        val now = System.currentTimeMillis()
+        val prodRef = db.collection("products").document(productId)
+        val costRef = db.collection("product_costs").document(productId)
+
+        val cleanNameEn = product.nameEn.trim().take(140)
+        if (cleanNameEn.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Product English name is required."))
+        }
+        val cleanSelling = product.sellingPriceInr.coerceIn(1L, 500_000L)
+        val cleanMrp = product.originalPriceInr.coerceIn(0L, 500_000L)
+        val newStock = product.stockCount.coerceIn(0L, 100_000L)
+        val cleanLowStock = product.lowStockThreshold.coerceIn(0L, 1_000L)
+        val cleanSizes = product.sizes.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15)
+        val cleanColors = product.colors.map { it.trim().take(60) }.filter { it.isNotEmpty() }.take(15)
+        val cleanCategory = ProductCategory.fromKey(product.category).name
 
         return try {
-            database.withTransaction {
-                val existing = dao.getProductById(productId)
-                val previousStock = existing?.stockCount ?: 0L
-                val newStock = product.stockCount.coerceIn(0L, 100000L)
-                val preservedCreatedAt = existing?.createdAtMillis ?: now
+            db.runTransaction { tx ->
+                // All reads BEFORE writes
+                val existingSnap = tx.get(prodRef)
+                val existingCostSnap = tx.get(costRef)
+                val previousStock = existingSnap.getLong("stockCount") ?: 0L
+                val existingSold = existingSnap.getLong("soldCount") ?: product.soldCount.coerceAtLeast(0L)
 
-                val entity = ProductEntity.fromModel(
-                    p = product.copy(createdAtMillis = preservedCreatedAt),
-                    idOverride = productId,
-                    nowMillis = now
-                )
-                dao.upsertProduct(entity)
+                val mutableProductFields = mapOf<String, Any?>(
+                    "nameEn" to cleanNameEn,
+                    "nameHi" to product.nameHi.trim().take(140),
+                    "category" to cleanCategory,
+                    "descriptionEn" to product.descriptionEn.trim().take(1000),
+                    "descriptionHi" to product.descriptionHi.trim().take(1000),
+                    "sellingPriceInr" to cleanSelling,
+                    "originalPriceInr" to cleanMrp,
+                    "stockCount" to newStock,
+                    "lowStockThreshold" to cleanLowStock,
+                    "sizes" to cleanSizes,
+                    "colors" to cleanColors,
+                    "variantNotes" to product.variantNotes.trim().take(300),
+                    "sampleImageKey" to product.sampleImageKey.trim().take(60),
+                    "imageUrl" to product.imageUrl.trim().take(600),
+                    "imageBase64" to product.imageBase64.take(350_000),
+                    "isPublished" to product.isPublished,
+                    "isFeatured" to product.isFeatured,
+                    "isDemo" to product.isDemo,
+                    "soldCount" to existingSold,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
 
-                dao.upsertProductCost(
-                    ProductCostEntity(
-                        productId = productId,
-                        costPriceInr = costPriceInr.coerceIn(0L, 500000L),
-                        supplierNote = supplierNote.trim().take(200),
-                        updatedBy = "owner",
-                        updatedAtMillis = now
+                if (existingSnap.exists()) {
+                    tx.update(prodRef, mutableProductFields)
+                } else {
+                    val createFields = mutableProductFields + mapOf(
+                        "createdBy" to uid,
+                        "createdAt" to FieldValue.serverTimestamp()
                     )
-                )
+                    tx.set(prodRef, createFields)
+                }
 
-                if (existing == null || previousStock != newStock) {
+                val costMutable = mapOf<String, Any?>(
+                    "costPriceInr" to costPriceInr.coerceIn(0L, 500_000L),
+                    "supplierNote" to supplierNote.trim().take(200),
+                    "updatedBy" to uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+
+                if (existingCostSnap.exists()) {
+                    tx.update(costRef, costMutable)
+                } else {
+                    tx.set(costRef, costMutable + mapOf("productId" to productId))
+                }
+
+                if (!existingSnap.exists() || previousStock != newStock) {
                     val movId = "mov_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-                    dao.insertInventoryMovement(
-                        InventoryMovementEntity(
-                            id = movId,
-                            productId = productId,
-                            productName = product.nameEn.trim().take(140),
-                            previousStock = previousStock,
-                            newStock = newStock,
-                            delta = newStock - previousStock,
-                            reason = if (existing == null) "INITIAL_STOCK" else "MANUAL_UPDATE",
-                            referenceId = productId,
-                            actorId = "owner",
-                            createdAtMillis = now
+                    val movRef = db.collection("inventory_movements").document(movId)
+                    tx.set(
+                        movRef,
+                        mapOf(
+                            "productId" to productId,
+                            "productName" to cleanNameEn,
+                            "previousStock" to previousStock,
+                            "newStock" to newStock,
+                            "delta" to (newStock - previousStock),
+                            "reason" to if (!existingSnap.exists()) "INITIAL_STOCK" else "MANUAL_UPDATE",
+                            "referenceId" to productId,
+                            "actorId" to uid,
+                            "createdAt" to FieldValue.serverTimestamp()
                         )
                     )
                 }
-            }
+            }.await()
             Result.success(productId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, if (isNew) OperationType.CREATE else OperationType.UPDATE, "products/$productId")
             Result.failure(e)
         }
     }
 
     suspend fun updateProductStockManually(product: Product, newStockCount: Long): Result<Unit> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (product.id.isBlank()) return Result.failure(IllegalArgumentException("Invalid product ID"))
-        val clampedStock = newStockCount.coerceIn(0L, 100000L)
-        val now = System.currentTimeMillis()
+        val clampedStock = newStockCount.coerceIn(0L, 100_000L)
+        val prodRef = db.collection("products").document(product.id)
 
         return try {
-            database.withTransaction {
-                val existing = dao.getProductById(product.id) ?: error("Product no longer exists")
-                val prevStock = existing.stockCount
-                if (prevStock == clampedStock) return@withTransaction
+            db.runTransaction { tx ->
+                val snap = tx.get(prodRef)
+                if (!snap.exists()) error("Product no longer exists")
+                val prevStock = snap.getLong("stockCount") ?: 0L
+                if (prevStock == clampedStock) return@runTransaction
+                val prodName = snap.getString("nameEn")?.take(140).orEmpty().ifBlank { product.nameEn.take(140) }
 
-                dao.upsertProduct(existing.copy(stockCount = clampedStock, updatedAtMillis = now))
-                val movId = "mov_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-                dao.insertInventoryMovement(
-                    InventoryMovementEntity(
-                        id = movId,
-                        productId = product.id,
-                        productName = existing.nameEn.take(140),
-                        previousStock = prevStock,
-                        newStock = clampedStock,
-                        delta = clampedStock - prevStock,
-                        reason = "MANUAL_UPDATE",
-                        referenceId = product.id,
-                        actorId = "owner",
-                        createdAtMillis = now
+                tx.update(
+                    prodRef,
+                    mapOf(
+                        "stockCount" to clampedStock,
+                        "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
-            }
+                val movId = "mov_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+                tx.set(
+                    db.collection("inventory_movements").document(movId),
+                    mapOf(
+                        "productId" to product.id,
+                        "productName" to prodName,
+                        "previousStock" to prevStock,
+                        "newStock" to clampedStock,
+                        "delta" to (clampedStock - prevStock),
+                        "reason" to "MANUAL_UPDATE",
+                        "referenceId" to product.id,
+                        "actorId" to uid,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "products/${product.id}")
             Result.failure(e)
         }
     }
 
-    suspend fun setProductPublished(productId: String, isPublished: Boolean): Result<Unit> = try {
-        database.withTransaction {
-            val existing = dao.getProductById(productId) ?: error("Product not found")
-            dao.upsertProduct(existing.copy(isPublished = isPublished, updatedAtMillis = System.currentTimeMillis()))
+    suspend fun setProductPublished(productId: String, isPublished: Boolean): Result<Unit> {
+        runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        return try {
+            db.collection("products").document(productId)
+                .update(
+                    mapOf(
+                        "isPublished" to isPublished,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "products/$productId")
+            Result.failure(e)
         }
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     suspend fun hideAllDemoProducts(products: List<Product>): Result<Int> {
+        runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val publishedDemos = products.filter { it.isDemo && it.isPublished && it.id.isNotBlank() }
         if (publishedDemos.isEmpty()) return Result.success(0)
-        val now = System.currentTimeMillis()
         return try {
-            database.withTransaction {
-                publishedDemos.forEach { demo ->
-                    val existing = dao.getProductById(demo.id)
-                    if (existing != null) {
-                        dao.upsertProduct(existing.copy(isPublished = false, updatedAtMillis = now))
-                    }
-                }
+            val batch = db.batch()
+            publishedDemos.forEach { demo ->
+                batch.update(
+                    db.collection("products").document(demo.id),
+                    mapOf(
+                        "isPublished" to false,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
             }
+            batch.commit().await()
             Result.success(publishedDemos.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "products")
             Result.failure(e)
         }
     }
 
-    suspend fun deleteProduct(productId: String): Result<Unit> = try {
-        database.withTransaction {
-            dao.deleteProductById(productId)
-            dao.deleteProductCostById(productId)
+    suspend fun deleteProduct(productId: String): Result<Unit> {
+        runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        return try {
+            val batch = db.batch()
+            batch.delete(db.collection("products").document(productId))
+            batch.delete(db.collection("product_costs").document(productId))
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, "products/$productId")
+            Result.failure(e)
         }
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     suspend fun seedDemoProducts(): Result<Int> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         val entries = DemoCatalog.buildSeedEntries()
-        val now = System.currentTimeMillis()
         return try {
-            database.withTransaction {
-                val productEntities = entries.map { entry ->
-                    ProductEntity.fromModel(entry.product, idOverride = entry.id, nowMillis = entry.product.updatedAtMillis)
-                }
-                val costEntities = entries.map { entry ->
-                    ProductCostEntity(
-                        productId = entry.id,
-                        costPriceInr = entry.sampleCostInr,
-                        supplierNote = "Starter sample cost",
-                        updatedBy = "owner",
-                        updatedAtMillis = now
-                    )
-                }
-                val movEntities = entries.map { entry ->
-                    InventoryMovementEntity(
-                        id = "mov_seed_${entry.id}",
-                        productId = entry.id,
-                        productName = entry.product.nameEn.take(140),
-                        previousStock = 0L,
-                        newStock = entry.product.stockCount,
-                        delta = entry.product.stockCount,
-                        reason = "INITIAL_STOCK",
-                        referenceId = entry.id,
-                        actorId = "owner",
-                        createdAtMillis = now
-                    )
-                }
-                dao.upsertProducts(productEntities)
-                dao.upsertProductCosts(costEntities)
-                dao.insertInventoryMovements(movEntities)
+            val existingProdSnaps = entries.associate { entry ->
+                entry.id to db.collection("products").document(entry.id).get().await()
             }
+            val existingCostSnaps = entries.associate { entry ->
+                entry.id to db.collection("product_costs").document(entry.id).get().await()
+            }
+
+            val batch = db.batch()
+            entries.forEach { entry ->
+                val p = entry.product
+                val prodRef = db.collection("products").document(entry.id)
+                val costRef = db.collection("product_costs").document(entry.id)
+                val prodSnap = existingProdSnaps.getValue(entry.id)
+                val costSnap = existingCostSnaps.getValue(entry.id)
+
+                val prodMutable = mapOf<String, Any?>(
+                    "nameEn" to p.nameEn.take(140),
+                    "nameHi" to p.nameHi.take(140),
+                    "category" to p.category,
+                    "descriptionEn" to p.descriptionEn.take(1000),
+                    "descriptionHi" to p.descriptionHi.take(1000),
+                    "sellingPriceInr" to p.sellingPriceInr,
+                    "originalPriceInr" to p.originalPriceInr,
+                    "stockCount" to p.stockCount,
+                    "lowStockThreshold" to p.lowStockThreshold,
+                    "sizes" to p.sizes.take(15),
+                    "colors" to p.colors.take(15),
+                    "sampleImageKey" to p.sampleImageKey,
+                    "isPublished" to true,
+                    "isFeatured" to p.isFeatured,
+                    "isDemo" to true,
+                    "soldCount" to (prodSnap.getLong("soldCount") ?: 0L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+
+                if (prodSnap.exists()) {
+                    batch.update(prodRef, prodMutable)
+                } else {
+                    batch.set(
+                        prodRef,
+                        prodMutable + mapOf(
+                            "createdBy" to uid,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    val movId = "mov_seed_${entry.id}_${UUID.randomUUID().toString().take(4)}"
+                        .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                    batch.set(
+                        db.collection("inventory_movements").document(movId),
+                        mapOf(
+                            "productId" to entry.id,
+                            "productName" to p.nameEn.take(140),
+                            "previousStock" to 0L,
+                            "newStock" to p.stockCount,
+                            "delta" to p.stockCount,
+                            "reason" to "INITIAL_STOCK",
+                            "referenceId" to entry.id,
+                            "actorId" to uid,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+
+                val costMutable = mapOf<String, Any?>(
+                    "costPriceInr" to entry.sampleCostInr,
+                    "supplierNote" to "Starter sample cost",
+                    "updatedBy" to uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+
+                if (costSnap.exists()) {
+                    batch.update(costRef, costMutable)
+                } else {
+                    batch.set(costRef, costMutable + mapOf("productId" to entry.id))
+                }
+            }
+            batch.commit().await()
             Result.success(entries.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "products")
             Result.failure(e)
         }
     }
@@ -290,6 +516,7 @@ class StoreRepository(
         cartItems: List<CartItem>,
         deterministicOrderId: String? = null
     ): Result<CustomerOrder> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (cartItems.isEmpty()) {
             return Result.failure(IllegalArgumentException("Cart is empty"))
         }
@@ -300,19 +527,25 @@ class StoreRepository(
 
         val orderId = deterministicOrderId?.takeIf { it.isNotBlank() }
             ?: "ord_${UUID.randomUUID().toString().replace("-", "").take(18)}"
-        val now = System.currentTimeMillis()
+        val nowMillis = System.currentTimeMillis()
 
         val requestedQtyByProduct: Map<String, Int> = cartItems
             .groupBy { it.product.id }
             .mapValues { (_, list) -> list.sumOf { it.quantity } }
 
+        val orderRef = db.collection("orders").document(orderId)
+        val settingsRef = db.collection("store_settings").document("public_config")
+
         return try {
-            val createdOrder = database.withTransaction {
-                if (dao.getOrderById(orderId) != null) {
+            val createdOrder = db.runTransaction { tx ->
+                // 1. ALL READS FIRST
+                val existingOrderSnap = tx.get(orderRef)
+                if (existingOrderSnap.exists()) {
                     error("Duplicate order submission detected. Please check My Orders.")
                 }
 
-                val settings = dao.getSettingsOnce()?.toModel() ?: StoreSettings()
+                val settingsSnap = tx.get(settingsRef)
+                val settings = if (settingsSnap.exists()) settingsSnap.toStoreSettings() else StoreSettings()
                 if (paymentMethod == PaymentMethodType.COD && !settings.codEnabled) {
                     error("Cash on Delivery is currently disabled by the shop owner.")
                 }
@@ -320,28 +553,30 @@ class StoreRepository(
                     error("UPI QR payment is awaiting verified merchant setup by the shop owner.")
                 }
 
-                val productEntities = requestedQtyByProduct.keys.associateWith { prodId ->
-                    dao.getProductById(prodId)
+                val productSnaps = requestedQtyByProduct.keys.associateWith { prodId ->
+                    tx.get(db.collection("products").document(prodId))
                 }
 
                 requestedQtyByProduct.forEach { (prodId, totalReqQty) ->
-                    val entity = productEntities[prodId]
-                    if (entity == null || !entity.isPublished) {
+                    val snap = productSnaps[prodId]
+                    val prod = snap?.toProductOrNull()
+                    if (prod == null || !prod.isPublished) {
                         error("One or more items are no longer available in the store.")
                     }
-                    if (totalReqQty <= 0 || totalReqQty.toLong() > entity.stockCount) {
-                        error("Insufficient stock for ${entity.nameEn} (Available: ${entity.stockCount}).")
+                    if (totalReqQty <= 0 || totalReqQty > 100 || totalReqQty.toLong() > prod.stockCount) {
+                        error("Insufficient stock for ${prod.nameEn} (Available: ${prod.stockCount}).")
                     }
                 }
 
+                // 2. COMPUTE VERIFIED LINE ITEMS & TOTALS
                 val verifiedLineItems = cartItems.map { cartItem ->
-                    val entity = productEntities.getValue(cartItem.product.id)!!
-                    val unitPrice = entity.sellingPriceInr
+                    val prod = productSnaps.getValue(cartItem.product.id).toProductOrNull()!!
+                    val unitPrice = prod.sellingPriceInr
                     val qty = cartItem.quantity.toLong()
                     OrderLineItem(
                         productId = cartItem.product.id,
-                        productName = entity.nameEn.take(120),
-                        category = entity.category,
+                        productName = prod.nameEn.take(120),
+                        category = prod.category,
                         quantity = qty,
                         unitPriceInr = unitPrice,
                         lineTotalInr = unitPrice * qty,
@@ -355,12 +590,10 @@ class StoreRepository(
                     error("Minimum order amount is ₹${settings.minOrderAmountInr}.")
                 }
 
-                val deliveryChargeInr = if (!settings.policiesConfirmed) {
-                    0L
-                } else if (settings.freeDeliveryThresholdInr > 0 && subtotalInr >= settings.freeDeliveryThresholdInr) {
-                    0L
-                } else {
-                    settings.deliveryChargeInr.coerceAtLeast(0L)
+                val deliveryChargeInr = when {
+                    !settings.policiesConfirmed -> 0L
+                    settings.freeDeliveryThresholdInr > 0 && subtotalInr >= settings.freeDeliveryThresholdInr -> 0L
+                    else -> settings.deliveryChargeInr.coerceAtLeast(0L)
                 }
 
                 val totalPayableInr = subtotalInr + deliveryChargeInr
@@ -374,46 +607,90 @@ class StoreRepository(
                     }
                 }.take(580)
 
+                val itemMaps = verifiedLineItems.map { line ->
+                    mapOf(
+                        "productId" to line.productId,
+                        "productName" to line.productName,
+                        "category" to line.category,
+                        "quantity" to line.quantity,
+                        "unitPriceInr" to line.unitPriceInr,
+                        "lineTotalInr" to line.lineTotalInr,
+                        "selectedSize" to line.selectedSize,
+                        "selectedColor" to line.selectedColor
+                    )
+                }
+
+                // 3. ALL WRITES ATOMICALLY (Order + Product Stock + Inventory Movements)
+                val orderPayload = mapOf<String, Any?>(
+                    "orderReference" to orderReference,
+                    "customerId" to uid,
+                    "customerName" to customerName.trim().take(100),
+                    "customerPhone" to cleanPhone,
+                    "deliveryAddress" to deliveryAddress.trim().take(400),
+                    "landmark" to landmark.trim().take(200),
+                    "items" to itemMaps,
+                    "itemSummary" to itemSummary,
+                    "totalQuantity" to totalQuantity,
+                    "subtotalInr" to subtotalInr,
+                    "deliveryChargeInr" to deliveryChargeInr,
+                    "discountInr" to 0L,
+                    "totalPayableInr" to totalPayableInr,
+                    "deliveryFeeConfirmed" to settings.policiesConfirmed,
+                    "paymentMethod" to paymentMethod.name,
+                    "paymentStatus" to PaymentStatus.PENDING.name,
+                    "orderStatus" to OrderStatus.PENDING.name,
+                    "stockDeducted" to true,
+                    "cancellationReason" to "",
+                    "invoiceNumber" to "",
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+
+                tx.set(orderRef, orderPayload)
+
                 requestedQtyByProduct.forEach { (prodId, totalReqQty) ->
-                    val entity = productEntities.getValue(prodId)!!
-                    val prevStock = entity.stockCount
+                    val prod = productSnaps.getValue(prodId).toProductOrNull()!!
+                    val prevStock = prod.stockCount
                     val newStock = prevStock - totalReqQty.toLong()
-                    dao.upsertProduct(
-                        entity.copy(
-                            stockCount = newStock,
-                            soldCount = entity.soldCount + totalReqQty.toLong(),
-                            lastOrderId = orderId,
-                            updatedAtMillis = now
+                    val prodRef = db.collection("products").document(prodId)
+                    tx.update(
+                        prodRef,
+                        mapOf(
+                            "stockCount" to newStock,
+                            "soldCount" to (prod.soldCount + totalReqQty.toLong()),
+                            "lastOrderId" to orderId,
+                            "updatedAt" to FieldValue.serverTimestamp()
                         )
                     )
+
                     val movId = "mov_${orderId}_${prodId.takeLast(8)}"
                         .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                         .take(120)
-                    dao.insertInventoryMovement(
-                        InventoryMovementEntity(
-                            id = movId,
-                            productId = prodId,
-                            productName = entity.nameEn.take(140),
-                            previousStock = prevStock,
-                            newStock = newStock,
-                            delta = -totalReqQty.toLong(),
-                            reason = "ONLINE_ORDER",
-                            referenceId = orderId,
-                            actorId = "customer",
-                            createdAtMillis = now
+                    tx.set(
+                        db.collection("inventory_movements").document(movId),
+                        mapOf(
+                            "productId" to prodId,
+                            "productName" to prod.nameEn.take(140),
+                            "previousStock" to prevStock,
+                            "newStock" to newStock,
+                            "delta" to -totalReqQty.toLong(),
+                            "reason" to "ONLINE_ORDER",
+                            "referenceId" to orderId,
+                            "actorId" to uid,
+                            "createdAt" to FieldValue.serverTimestamp()
                         )
                     )
                 }
 
-                val orderEntity = CustomerOrderEntity(
+                CustomerOrder(
                     id = orderId,
                     orderReference = orderReference,
-                    customerId = "local_customer",
+                    customerId = uid,
                     customerName = customerName.trim().take(100),
                     customerPhone = cleanPhone,
                     deliveryAddress = deliveryAddress.trim().take(400),
                     landmark = landmark.trim().take(200),
-                    itemsEncoded = StoreCodec.encodeLineItems(verifiedLineItems),
+                    lineItems = verifiedLineItems,
                     itemSummary = itemSummary,
                     totalQuantity = totalQuantity,
                     subtotalInr = subtotalInr,
@@ -425,27 +702,53 @@ class StoreRepository(
                     paymentStatus = PaymentStatus.PENDING.name,
                     orderStatus = OrderStatus.PENDING.name,
                     stockDeducted = true,
-                    cancellationReason = "",
-                    invoiceNumber = "",
-                    createdAtMillis = now,
-                    updatedAtMillis = now
+                    createdAtMillis = nowMillis,
+                    updatedAtMillis = nowMillis
                 )
-                dao.upsertOrder(orderEntity)
-                orderEntity.toModel()
-            }
+            }.await()
             Result.success(createdOrder)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "orders/$orderId")
             Result.failure(e)
         }
     }
 
-    fun observeCustomerOrders(): Flow<List<CustomerOrder>> =
-        dao.observeAllOrders().map { list -> list.map { it.toModel() } }
+    fun observeCustomerOrders(customerId: String = auth.currentUser?.uid.orEmpty()): Flow<List<CustomerOrder>> {
+        if (customerId.isBlank()) return emptyFlow()
+        return db.collection("orders")
+            .whereEqualTo("customerId", customerId)
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toCustomerOrderOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "orders")
+                throw e
+            }
+    }
+
+    suspend fun getOrderById(orderId: String): Result<CustomerOrder> {
+        runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        return try {
+            val snap = db.collection("orders").document(orderId).get().await()
+            val order = snap.toCustomerOrderOrNull() ?: error("Order not found")
+            Result.success(order)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, "orders/$orderId")
+            Result.failure(e)
+        }
+    }
 
     fun observeAllOrdersForOwner(): Flow<List<CustomerOrder>> =
-        dao.observeAllOrders().map { list -> list.map { it.toModel() } }
+        db.collection("orders")
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toCustomerOrderOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "orders")
+                throw e
+            }
 
     suspend fun updateOrderByOwner(
         orderId: String,
@@ -454,49 +757,64 @@ class StoreRepository(
         cancellationReason: String = "",
         generateInvoiceIfMissing: Boolean = false
     ): Result<Unit> {
-        val now = System.currentTimeMillis()
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        val orderRef = db.collection("orders").document(orderId)
+
         return try {
-            database.withTransaction {
-                val currentEntity = dao.getOrderById(orderId) ?: error("Order not found")
-                val currentOrder = currentEntity.toModel()
-
+            db.runTransaction { tx ->
+                // 1. ALL READS FIRST
+                val orderSnap = tx.get(orderRef)
+                val currentOrder = orderSnap.toCustomerOrderOrNull() ?: error("Order not found")
                 val shouldRestock = newOrderStatus == OrderStatus.CANCELLED && currentOrder.stockDeducted
-                var updatedStockDeducted = currentOrder.stockDeducted
 
-                if (shouldRestock) {
-                    val lineItemsByProduct = currentOrder.parsedItems()
+                val lineItemsByProduct = if (shouldRestock) {
+                    currentOrder.parsedItems()
                         .filter { it.productId.isNotBlank() }
                         .groupBy { it.productId }
                         .mapValues { (_, list) -> list.sumOf { it.quantity } }
+                } else {
+                    emptyMap()
+                }
 
+                val prodSnaps = lineItemsByProduct.keys.associateWith { prodId ->
+                    tx.get(db.collection("products").document(prodId))
+                }
+
+                // 2. WRITES
+                var updatedStockDeducted = currentOrder.stockDeducted
+                if (shouldRestock) {
                     lineItemsByProduct.forEach { (prodId, qtyToRestore) ->
-                        val prodEntity = dao.getProductById(prodId)
-                        if (prodEntity != null) {
-                            val prevStock = prodEntity.stockCount
-                            val newStock = prevStock + qtyToRestore
-                            val newSold = (prodEntity.soldCount - qtyToRestore).coerceAtLeast(0L)
-                            dao.upsertProduct(
-                                prodEntity.copy(
-                                    stockCount = newStock,
-                                    soldCount = newSold,
-                                    updatedAtMillis = now
+                        val pSnap = prodSnaps[prodId]
+                        if (pSnap != null && pSnap.exists()) {
+                            val prevStock = pSnap.getLong("stockCount") ?: 0L
+                            val prevSold = pSnap.getLong("soldCount") ?: 0L
+                            val newStock = (prevStock + qtyToRestore).coerceAtMost(100_000L)
+                            val newSold = (prevSold - qtyToRestore).coerceAtLeast(0L)
+                            val prodName = pSnap.getString("nameEn")?.take(140).orEmpty().ifBlank { "Product" }
+
+                            tx.update(
+                                db.collection("products").document(prodId),
+                                mapOf(
+                                    "stockCount" to newStock,
+                                    "soldCount" to newSold,
+                                    "updatedAt" to FieldValue.serverTimestamp()
                                 )
                             )
                             val movId = "mov_restock_${orderId}_${prodId.takeLast(6)}_${UUID.randomUUID().toString().take(4)}"
                                 .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                                 .take(120)
-                            dao.insertInventoryMovement(
-                                InventoryMovementEntity(
-                                    id = movId,
-                                    productId = prodId,
-                                    productName = prodEntity.nameEn.take(140),
-                                    previousStock = prevStock,
-                                    newStock = newStock,
-                                    delta = qtyToRestore,
-                                    reason = "ORDER_CANCELLED_RESTOCK",
-                                    referenceId = orderId,
-                                    actorId = "owner",
-                                    createdAtMillis = now
+                            tx.set(
+                                db.collection("inventory_movements").document(movId),
+                                mapOf(
+                                    "productId" to prodId,
+                                    "productName" to prodName,
+                                    "previousStock" to prevStock,
+                                    "newStock" to newStock,
+                                    "delta" to (newStock - prevStock),
+                                    "reason" to "ORDER_CANCELLED_RESTOCK",
+                                    "referenceId" to orderId,
+                                    "actorId" to uid,
+                                    "createdAt" to FieldValue.serverTimestamp()
                                 )
                             )
                         }
@@ -512,21 +830,29 @@ class StoreRepository(
                     ""
                 }
 
-                dao.upsertOrder(
-                    currentEntity.copy(
-                        orderStatus = newOrderStatus.name,
-                        paymentStatus = newPaymentStatus.name,
-                        stockDeducted = updatedStockDeducted,
-                        cancellationReason = if (cancellationReason.isNotBlank()) cancellationReason.trim().take(300) else currentEntity.cancellationReason,
-                        invoiceNumber = invoiceNum,
-                        updatedAtMillis = now
-                    )
+                val nextCancelReason = if (cancellationReason.isNotBlank()) {
+                    cancellationReason.trim().take(300)
+                } else {
+                    currentOrder.cancellationReason
+                }
+
+                tx.update(
+                    orderRef,
+                    mapOf<String, Any?>(
+                        "orderStatus" to newOrderStatus.name,
+                        "paymentStatus" to newPaymentStatus.name,
+                        "stockDeducted" to updatedStockDeducted,
+                        "cancellationReason" to nextCancelReason,
+                        "invoiceNumber" to invoiceNum,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    ).filterValues { it != null }
                 )
-            }
+            }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "orders/$orderId")
             Result.failure(e)
         }
     }
@@ -538,15 +864,21 @@ class StoreRepository(
         discountInr: Long,
         paymentMethod: String
     ): Result<OfflineSale> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
         if (lineItems.isEmpty()) return Result.failure(IllegalArgumentException("Add at least one item"))
         val saleId = "sale_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        val now = System.currentTimeMillis()
+        val nowMillis = System.currentTimeMillis()
         val catalogProductIds = lineItems.map { it.productId }.filter { it.isNotBlank() }.distinct()
 
         return try {
-            val savedSale = database.withTransaction {
-                val prodEntities = catalogProductIds.associateWith { id -> dao.getProductById(id) }
-                val costEntities = catalogProductIds.associateWith { id -> dao.getProductCostById(id) }
+            val savedSale = db.runTransaction { tx ->
+                // 1. ALL READS FIRST
+                val prodSnaps = catalogProductIds.associateWith { id ->
+                    tx.get(db.collection("products").document(id))
+                }
+                val costSnaps = catalogProductIds.associateWith { id ->
+                    tx.get(db.collection("product_costs").document(id))
+                }
 
                 val qtyByProduct = lineItems
                     .filter { it.productId.isNotBlank() }
@@ -554,9 +886,12 @@ class StoreRepository(
                     .mapValues { (_, list) -> list.sumOf { it.quantity } }
 
                 qtyByProduct.forEach { (prodId, reqQty) ->
-                    val pEntity = prodEntities[prodId] ?: error("Selected product no longer exists.")
-                    if (reqQty > pEntity.stockCount) {
-                        error("Only ${pEntity.stockCount} units available in stock for ${pEntity.nameEn}.")
+                    val pSnap = prodSnaps[prodId]
+                    if (pSnap == null || !pSnap.exists()) error("Selected product no longer exists.")
+                    val avail = pSnap.getLong("stockCount") ?: 0L
+                    val pName = pSnap.getString("nameEn").orEmpty()
+                    if (reqQty > avail) {
+                        error("Only $avail units available in stock for $pName.")
                     }
                 }
 
@@ -570,7 +905,7 @@ class StoreRepository(
 
                 lineItems.forEach { line ->
                     val unitCost = if (line.productId.isNotBlank()) {
-                        costEntities[line.productId]?.costPriceInr ?: 0L
+                        costSnaps[line.productId]?.getLong("costPriceInr") ?: 0L
                     } else {
                         0L
                     }
@@ -588,32 +923,37 @@ class StoreRepository(
                     0L
                 }
 
+                // 2. WRITES
                 qtyByProduct.forEach { (prodId, reqQty) ->
-                    val pEntity = prodEntities.getValue(prodId)!!
-                    val prevStock = pEntity.stockCount
+                    val pSnap = prodSnaps.getValue(prodId)
+                    val prevStock = pSnap.getLong("stockCount") ?: 0L
+                    val prevSold = pSnap.getLong("soldCount") ?: 0L
                     val newStock = prevStock - reqQty
-                    dao.upsertProduct(
-                        pEntity.copy(
-                            stockCount = newStock,
-                            soldCount = pEntity.soldCount + reqQty,
-                            updatedAtMillis = now
+                    val pName = pSnap.getString("nameEn")?.take(140).orEmpty().ifBlank { "Product" }
+
+                    tx.update(
+                        db.collection("products").document(prodId),
+                        mapOf(
+                            "stockCount" to newStock,
+                            "soldCount" to (prevSold + reqQty),
+                            "updatedAt" to FieldValue.serverTimestamp()
                         )
                     )
                     val movId = "mov_${saleId}_${prodId.takeLast(8)}"
                         .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                         .take(120)
-                    dao.insertInventoryMovement(
-                        InventoryMovementEntity(
-                            id = movId,
-                            productId = prodId,
-                            productName = pEntity.nameEn.take(140),
-                            previousStock = prevStock,
-                            newStock = newStock,
-                            delta = -reqQty,
-                            reason = "OFFLINE_SALE",
-                            referenceId = saleId,
-                            actorId = "owner",
-                            createdAtMillis = now
+                    tx.set(
+                        db.collection("inventory_movements").document(movId),
+                        mapOf(
+                            "productId" to prodId,
+                            "productName" to pName,
+                            "previousStock" to prevStock,
+                            "newStock" to newStock,
+                            "delta" to -reqQty,
+                            "reason" to "OFFLINE_SALE",
+                            "referenceId" to saleId,
+                            "actorId" to uid,
+                            "createdAt" to FieldValue.serverTimestamp()
                         )
                     )
                 }
@@ -622,13 +962,45 @@ class StoreRepository(
                 val itemSummary = lineItems.joinToString(", ") { "${it.productName} x${it.quantity}" }.take(580)
                 val safeMethod = if (paymentMethod in setOf("CASH", "UPI", "CARD")) paymentMethod else "CASH"
                 val epochDay = currentEpochDay()
+                val itemMaps = lineItems.map { line ->
+                    mapOf(
+                        "productId" to line.productId,
+                        "productName" to line.productName.take(120),
+                        "category" to line.category,
+                        "quantity" to line.quantity,
+                        "unitPriceInr" to line.unitPriceInr,
+                        "lineTotalInr" to line.lineTotalInr,
+                        "selectedSize" to line.selectedSize.take(40),
+                        "selectedColor" to line.selectedColor.take(40)
+                    )
+                }
 
-                val saleEntity = OfflineSaleEntity(
+                val salePayload = mapOf<String, Any?>(
+                    "invoiceNumber" to invoiceNumber,
+                    "customerName" to customerName.trim().take(100),
+                    "customerPhone" to customerPhone.trim().take(20),
+                    "items" to itemMaps,
+                    "itemSummary" to itemSummary,
+                    "subtotalInr" to subtotalInr,
+                    "discountInr" to safeDiscount,
+                    "totalPaidInr" to totalPaidInr,
+                    "totalCostInr" to totalCostInr,
+                    "costCoveredRevenueInr" to costCoveredRevenueInr,
+                    "allCostsRecorded" to allRecorded,
+                    "paymentMethod" to safeMethod,
+                    "recordedBy" to uid,
+                    "saleDateEpochDay" to epochDay,
+                    "createdAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+
+                tx.set(db.collection("offline_sales").document(saleId), salePayload)
+
+                OfflineSale(
                     id = saleId,
                     invoiceNumber = invoiceNumber,
                     customerName = customerName.trim().take(100),
                     customerPhone = customerPhone.trim().take(20),
-                    itemsEncoded = StoreCodec.encodeLineItems(lineItems),
+                    lineItems = lineItems,
                     itemSummary = itemSummary,
                     subtotalInr = subtotalInr,
                     discountInr = safeDiscount,
@@ -637,26 +1009,37 @@ class StoreRepository(
                     costCoveredRevenueInr = costCoveredRevenueInr,
                     allCostsRecorded = allRecorded,
                     paymentMethod = safeMethod,
-                    recordedBy = "owner",
+                    recordedBy = uid,
                     saleDateEpochDay = epochDay,
-                    createdAtMillis = now
+                    createdAtMillis = nowMillis
                 )
-                dao.insertOfflineSale(saleEntity)
-                saleEntity.toModel()
-            }
+            }.await()
             Result.success(savedSale)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "offline_sales/$saleId")
             Result.failure(e)
         }
     }
 
     fun observeOfflineSalesForOwner(): Flow<List<OfflineSale>> =
-        dao.observeOfflineSales().map { list -> list.map { it.toModel() } }
+        db.collection("offline_sales")
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toOfflineSaleOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "offline_sales")
+                throw e
+            }
 
     fun observeExpensesForOwner(): Flow<List<Expense>> =
-        dao.observeExpenses().map { list -> list.map { it.toModel() } }
+        db.collection("expenses")
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toExpenseOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "expenses")
+                throw e
+            }
 
     suspend fun addExpense(
         title: String,
@@ -664,38 +1047,242 @@ class StoreRepository(
         amountInr: Long,
         notes: String
     ): Result<String> {
+        val uid = runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        val cleanTitle = title.trim().take(140)
+        if (cleanTitle.length < 2) {
+            return Result.failure(IllegalArgumentException("Expense title must be at least 2 characters."))
+        }
         val expId = "exp_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        val now = System.currentTimeMillis()
+        val payload = mapOf<String, Any?>(
+            "title" to cleanTitle,
+            "category" to category.name,
+            "amountInr" to amountInr.coerceIn(1L, 5_000_000L),
+            "notes" to notes.trim().take(300),
+            "recordedBy" to uid,
+            "expenseDateEpochDay" to currentEpochDay(),
+            "createdAt" to FieldValue.serverTimestamp()
+        ).filterValues { it != null }
+
         return try {
-            dao.insertExpense(
-                ExpenseEntity(
-                    id = expId,
-                    title = title.trim().take(140),
-                    category = category.name,
-                    amountInr = amountInr.coerceIn(1L, 5000000L),
-                    notes = notes.trim().take(300),
-                    recordedBy = "owner",
-                    expenseDateEpochDay = currentEpochDay(),
-                    createdAtMillis = now
-                )
-            )
+            db.collection("expenses").document(expId).set(payload).await()
             Result.success(expId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "expenses/$expId")
             Result.failure(e)
         }
     }
 
-    suspend fun deleteExpense(expenseId: String): Result<Unit> = try {
-        dao.deleteExpenseById(expenseId)
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun deleteExpense(expenseId: String): Result<Unit> {
+        runCatching { requireUid() }.getOrElse { return Result.failure(it) }
+        return try {
+            db.collection("expenses").document(expenseId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, "expenses/$expenseId")
+            Result.failure(e)
+        }
     }
 
     fun observeInventoryMovementsForOwner(): Flow<List<InventoryMovement>> =
-        dao.observeInventoryMovements().map { list -> list.map { it.toModel() } }
+        db.collection("inventory_movements")
+            .snapshots()
+            .map { snapshot -> snapshot.documents.mapNotNull { it.toInventoryMovementOrNull() } }
+            .catch { e ->
+                handleFirestoreError(e, OperationType.LIST, "inventory_movements")
+                throw e
+            }
+
+    // --- Safe DocumentSnapshot Mappers using ServerTimestampBehavior.ESTIMATE ---
+
+    private fun DocumentSnapshot.estimatedMillis(field: String): Long =
+        getTimestamp(field, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)?.toDate()?.time
+            ?: System.currentTimeMillis()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun DocumentSnapshot.stringList(field: String): List<String> =
+        (get(field) as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun DocumentSnapshot.parseOrderLineItems(): List<OrderLineItem> {
+        val raw = get("items") as? List<*> ?: return emptyList()
+        return raw.mapNotNull { entry ->
+            val m = entry as? Map<*, *> ?: return@mapNotNull null
+            OrderLineItem(
+                productId = m["productId"]?.toString().orEmpty(),
+                productName = m["productName"]?.toString().orEmpty(),
+                category = m["category"]?.toString().orEmpty().ifBlank { ProductCategory.SAREES.name },
+                quantity = (m["quantity"] as? Number)?.toLong() ?: 1L,
+                unitPriceInr = (m["unitPriceInr"] as? Number)?.toLong() ?: 0L,
+                lineTotalInr = (m["lineTotalInr"] as? Number)?.toLong() ?: 0L,
+                selectedSize = m["selectedSize"]?.toString().orEmpty(),
+                selectedColor = m["selectedColor"]?.toString().orEmpty()
+            )
+        }
+    }
+
+    private fun DocumentSnapshot.toStoreSettings(): StoreSettings {
+        val d = StoreSettings()
+        return StoreSettings(
+            id = id,
+            storeNameEn = getString("storeNameEn") ?: d.storeNameEn,
+            storeNameHi = getString("storeNameHi") ?: d.storeNameHi,
+            ownerName = getString("ownerName") ?: d.ownerName,
+            phone = getString("phone") ?: d.phone,
+            whatsappNumber = getString("whatsappNumber") ?: d.whatsappNumber,
+            email = getString("email") ?: d.email,
+            addressEn = getString("addressEn") ?: d.addressEn,
+            addressHi = getString("addressHi") ?: d.addressHi,
+            promoBannerEn = getString("promoBannerEn") ?: d.promoBannerEn,
+            promoBannerHi = getString("promoBannerHi") ?: d.promoBannerHi,
+            deliveryCoverageEn = getString("deliveryCoverageEn") ?: d.deliveryCoverageEn,
+            deliveryCoverageHi = getString("deliveryCoverageHi") ?: d.deliveryCoverageHi,
+            deliveryChargeInr = getLong("deliveryChargeInr") ?: d.deliveryChargeInr,
+            freeDeliveryThresholdInr = getLong("freeDeliveryThresholdInr") ?: d.freeDeliveryThresholdInr,
+            minOrderAmountInr = getLong("minOrderAmountInr") ?: d.minOrderAmountInr,
+            expectedDeliveryEn = getString("expectedDeliveryEn") ?: d.expectedDeliveryEn,
+            expectedDeliveryHi = getString("expectedDeliveryHi") ?: d.expectedDeliveryHi,
+            returnPolicyEn = getString("returnPolicyEn") ?: d.returnPolicyEn,
+            returnPolicyHi = getString("returnPolicyHi") ?: d.returnPolicyHi,
+            policiesConfirmed = getBoolean("policiesConfirmed") ?: d.policiesConfirmed,
+            codEnabled = getBoolean("codEnabled") ?: d.codEnabled,
+            upiEnabled = getBoolean("upiEnabled") ?: d.upiEnabled,
+            merchantUpiId = getString("merchantUpiId") ?: d.merchantUpiId,
+            merchantPayeeName = getString("merchantPayeeName") ?: d.merchantPayeeName,
+            updatedBy = getString("updatedBy") ?: d.updatedBy,
+            updatedAtMillis = estimatedMillis("updatedAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toProductOrNull(): Product? {
+        if (!exists()) return null
+        val nameEn = getString("nameEn") ?: return null
+        return Product(
+            id = id,
+            nameEn = nameEn,
+            nameHi = getString("nameHi").orEmpty(),
+            category = getString("category") ?: ProductCategory.SAREES.name,
+            descriptionEn = getString("descriptionEn").orEmpty(),
+            descriptionHi = getString("descriptionHi").orEmpty(),
+            sellingPriceInr = getLong("sellingPriceInr") ?: 0L,
+            originalPriceInr = getLong("originalPriceInr") ?: 0L,
+            stockCount = getLong("stockCount") ?: 0L,
+            lowStockThreshold = getLong("lowStockThreshold") ?: 3L,
+            sizes = stringList("sizes"),
+            colors = stringList("colors"),
+            variantNotes = getString("variantNotes").orEmpty(),
+            sampleImageKey = getString("sampleImageKey").orEmpty(),
+            imageUrl = getString("imageUrl").orEmpty(),
+            imageBase64 = getString("imageBase64").orEmpty(),
+            isPublished = getBoolean("isPublished") ?: true,
+            isFeatured = getBoolean("isFeatured") ?: false,
+            isDemo = getBoolean("isDemo") ?: false,
+            soldCount = getLong("soldCount") ?: 0L,
+            lastOrderId = getString("lastOrderId").orEmpty(),
+            createdBy = getString("createdBy").orEmpty(),
+            createdAtMillis = estimatedMillis("createdAt"),
+            updatedAtMillis = estimatedMillis("updatedAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toProductCostOrNull(): ProductCost? {
+        if (!exists()) return null
+        val prodId = getString("productId") ?: id
+        return ProductCost(
+            id = id,
+            productId = prodId,
+            costPriceInr = getLong("costPriceInr") ?: 0L,
+            supplierNote = getString("supplierNote").orEmpty(),
+            updatedBy = getString("updatedBy").orEmpty(),
+            updatedAtMillis = estimatedMillis("updatedAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toCustomerOrderOrNull(): CustomerOrder? {
+        if (!exists()) return null
+        val orderRef = getString("orderReference") ?: return null
+        return CustomerOrder(
+            id = id,
+            orderReference = orderRef,
+            customerId = getString("customerId").orEmpty(),
+            customerName = getString("customerName").orEmpty(),
+            customerPhone = getString("customerPhone").orEmpty(),
+            deliveryAddress = getString("deliveryAddress").orEmpty(),
+            landmark = getString("landmark").orEmpty(),
+            lineItems = parseOrderLineItems(),
+            itemSummary = getString("itemSummary").orEmpty(),
+            totalQuantity = getLong("totalQuantity") ?: 1L,
+            subtotalInr = getLong("subtotalInr") ?: 0L,
+            deliveryChargeInr = getLong("deliveryChargeInr") ?: 0L,
+            discountInr = getLong("discountInr") ?: 0L,
+            totalPayableInr = getLong("totalPayableInr") ?: 0L,
+            deliveryFeeConfirmed = getBoolean("deliveryFeeConfirmed") ?: false,
+            paymentMethod = getString("paymentMethod") ?: PaymentMethodType.COD.name,
+            paymentStatus = getString("paymentStatus") ?: PaymentStatus.PENDING.name,
+            orderStatus = getString("orderStatus") ?: OrderStatus.PENDING.name,
+            stockDeducted = getBoolean("stockDeducted") ?: true,
+            cancellationReason = getString("cancellationReason").orEmpty(),
+            invoiceNumber = getString("invoiceNumber").orEmpty(),
+            createdAtMillis = estimatedMillis("createdAt"),
+            updatedAtMillis = estimatedMillis("updatedAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toOfflineSaleOrNull(): OfflineSale? {
+        if (!exists()) return null
+        val inv = getString("invoiceNumber") ?: return null
+        return OfflineSale(
+            id = id,
+            invoiceNumber = inv,
+            customerName = getString("customerName").orEmpty(),
+            customerPhone = getString("customerPhone").orEmpty(),
+            lineItems = parseOrderLineItems(),
+            itemSummary = getString("itemSummary").orEmpty(),
+            subtotalInr = getLong("subtotalInr") ?: 0L,
+            discountInr = getLong("discountInr") ?: 0L,
+            totalPaidInr = getLong("totalPaidInr") ?: 0L,
+            totalCostInr = getLong("totalCostInr") ?: 0L,
+            costCoveredRevenueInr = getLong("costCoveredRevenueInr") ?: 0L,
+            allCostsRecorded = getBoolean("allCostsRecorded") ?: false,
+            paymentMethod = getString("paymentMethod") ?: "CASH",
+            recordedBy = getString("recordedBy").orEmpty(),
+            saleDateEpochDay = getLong("saleDateEpochDay") ?: 0L,
+            createdAtMillis = estimatedMillis("createdAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toExpenseOrNull(): Expense? {
+        if (!exists()) return null
+        val title = getString("title") ?: return null
+        return Expense(
+            id = id,
+            title = title,
+            category = getString("category") ?: ExpenseCategory.OTHER.name,
+            amountInr = getLong("amountInr") ?: 0L,
+            notes = getString("notes").orEmpty(),
+            recordedBy = getString("recordedBy").orEmpty(),
+            expenseDateEpochDay = getLong("expenseDateEpochDay") ?: 0L,
+            createdAtMillis = estimatedMillis("createdAt")
+        )
+    }
+
+    private fun DocumentSnapshot.toInventoryMovementOrNull(): InventoryMovement? {
+        if (!exists()) return null
+        val prodId = getString("productId") ?: return null
+        return InventoryMovement(
+            id = id,
+            productId = prodId,
+            productName = getString("productName").orEmpty(),
+            previousStock = getLong("previousStock") ?: 0L,
+            newStock = getLong("newStock") ?: 0L,
+            delta = getLong("delta") ?: 0L,
+            reason = getString("reason") ?: "MANUAL_UPDATE",
+            referenceId = getString("referenceId").orEmpty(),
+            actorId = getString("actorId").orEmpty(),
+            createdAtMillis = estimatedMillis("createdAt")
+        )
+    }
 }

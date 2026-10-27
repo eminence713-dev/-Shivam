@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,17 +19,20 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Button
@@ -54,10 +58,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppLanguage
 import com.example.data.model.CartItem
@@ -78,7 +85,6 @@ import com.example.util.UpiPaymentHelper
 import com.example.util.WhatsAppHelper
 import com.example.util.formatInr
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -139,7 +145,10 @@ fun CartAndCheckoutTab(
         return
     }
 
+    val totalUnits = cartItems.sumOf { it.quantity }
+    val totalMrp = cartItems.sumOf { it.lineOriginalTotalInr }
     val subtotal = cartItems.sumOf { it.lineSubtotalInr }
+    val totalMrpSavings = (totalMrp - subtotal).coerceAtLeast(0L)
     val deliveryFee = when {
         !settings.policiesConfirmed -> 0L
         settings.freeDeliveryThresholdInr > 0L && subtotal >= settings.freeDeliveryThresholdInr -> 0L
@@ -173,7 +182,7 @@ fun CartAndCheckoutTab(
             }
 
             Text(
-                text = if (lang == AppLanguage.HINDI) "शॉपिंग कार्ट (${cartItems.sumOf { it.quantity }} पीस)" else "Shopping Cart (${cartItems.sumOf { it.quantity }} items)",
+                text = if (lang == AppLanguage.HINDI) "मेरा कार्ट ($totalUnits पीस)" else "My Cart ($totalUnits items)",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -190,7 +199,8 @@ fun CartAndCheckoutTab(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = item.product.displayName(lang),
-                                style = MaterialTheme.typography.titleSmall
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
                             )
                             val opts = listOf(item.selectedSize, item.selectedColor)
                                 .filter { it.isNotBlank() }
@@ -201,9 +211,21 @@ fun CartAndCheckoutTab(
                             Text(
                                 text = "${formatInr(item.product.sellingPriceInr)} × ${item.quantity} = ${formatInr(item.lineSubtotalInr)}",
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                            if (item.lineSavingsInr > 0L) {
+                                Text(
+                                    text = if (lang == AppLanguage.HINDI) {
+                                        "छूट बचत: ${formatInr(item.lineSavingsInr)}"
+                                    } else {
+                                        "Discount saved: ${formatInr(item.lineSavingsInr)}"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VerifiedGreen,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { onUpdateQuantity(item.key, item.quantity - 1) }) {
@@ -221,33 +243,51 @@ fun CartAndCheckoutTab(
                 }
             }
 
-            // Bill Summary
+            // Flipkart-Style Price Details Card
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (lang == AppLanguage.HINDI) "मूल्य विवरण (Price Details)" else "Price Details",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    HorizontalDivider()
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(if (lang == AppLanguage.HINDI) "वस्तुओं का कुल (Subtotal)" else "Items Subtotal")
-                        Text(formatInr(subtotal), fontWeight = FontWeight.SemiBold)
+                        Text(if (lang == AppLanguage.HINDI) "कुल एमआरपी ($totalUnits पीस)" else "Price ($totalUnits items)")
+                        Text(formatInr(totalMrp))
+                    }
+                    if (totalMrpSavings > 0L) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (lang == AppLanguage.HINDI) "छूट (Discount)" else "Discount")
+                            Text(
+                                text = "− ${formatInr(totalMrpSavings)}",
+                                color = VerifiedGreen,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(if (lang == AppLanguage.HINDI) "डिलीवरी शुल्क" else "Delivery Charge")
+                        Text(if (lang == AppLanguage.HINDI) "डिलीवरी शुल्क" else "Delivery Charges")
                         Text(
                             text = if (!settings.policiesConfirmed) {
-                                if (lang == AppLanguage.HINDI) "दुकान द्वारा पुष्टि बाकी" else "Awaiting owner confirmation"
+                                if (lang == AppLanguage.HINDI) "दुकान द्वारा पुष्टि" else "Confirmed on call"
                             } else if (deliveryFee == 0L) {
-                                "₹0 (Free)"
+                                "FREE"
                             } else {
                                 formatInr(deliveryFee)
                             },
-                            style = MaterialTheme.typography.bodyMedium
+                            color = if (deliveryFee == 0L) VerifiedGreen else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider()
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = if (lang == AppLanguage.HINDI) "कुल देय राशि" else "Final Payable Total",
+                            text = if (lang == AppLanguage.HINDI) "कुल देय राशि" else "Total Amount",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -258,12 +298,31 @@ fun CartAndCheckoutTab(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+                    if (totalMrpSavings > 0L) {
+                        Surface(
+                            color = VerifiedGreen.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) {
+                                    "🎉 इस ऑर्डर पर आपकी कुल बचत ${formatInr(totalMrpSavings)} है!"
+                                } else {
+                                    "🎉 You will save ${formatInr(totalMrpSavings)} on this order!"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = VerifiedGreen,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
                 }
             }
 
             // Delivery & Payment Form
             Text(
-                text = if (lang == AppLanguage.HINDI) "डिलीवरी विवरण (खाता पंजीकरण आवश्यक नहीं)" else "Delivery & Payment Details",
+                text = if (lang == AppLanguage.HINDI) "डिलीवरी पता और भुगतान विवरण" else "Delivery Address & Payment",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -310,10 +369,10 @@ fun CartAndCheckoutTab(
                 modifier = Modifier.fillMaxWidth().testTag("checkout_landmark_input")
             )
 
-            // Payment Method Selection
             Text(
                 text = if (lang == AppLanguage.HINDI) "भुगतान का तरीका चुनें:" else "Select Payment Method:",
-                style = MaterialTheme.typography.titleSmall
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
             )
 
             if (settings.codEnabled) {
@@ -425,9 +484,10 @@ fun CartAndCheckoutTab(
                     }
                 },
                 enabled = !isPlacingOrder && (settings.codEnabled || settings.isUpiConfiguredAndActive),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(54.dp)
                     .testTag("place_order_button")
             ) {
                 if (isPlacingOrder) {
@@ -437,11 +497,13 @@ fun CartAndCheckoutTab(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("${AppStrings.placeOrder.get(lang)} • ${formatInr(finalPayable)}")
+                    Text(
+                        text = "${AppStrings.placeOrder.get(lang)} • ${formatInr(finalPayable)}",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
-            // WhatsApp alternative with explicit non-saved disclaimer
             OutlinedButton(
                 onClick = {
                     val msg = WhatsAppHelper.buildCartEnquiryMessage(
@@ -475,6 +537,106 @@ fun CartAndCheckoutTab(
 }
 
 @Composable
+fun OrderTrackingStepper(
+    status: OrderStatus,
+    lang: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    if (status == OrderStatus.CANCELLED) {
+        Surface(
+            color = MaterialTheme.colorScheme.errorContainer,
+            shape = RoundedCornerShape(10.dp),
+            modifier = modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(10.dp)
+            ) {
+                Icon(Icons.Filled.Cancel, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (lang == AppLanguage.HINDI) "यह ऑर्डर रद्द कर दिया गया है (Cancelled)" else "Order Cancelled",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        return
+    }
+
+    val steps = listOf(
+        OrderStatus.PENDING to (if (lang == AppLanguage.HINDI) "बुक" else "Placed"),
+        OrderStatus.CONFIRMED to (if (lang == AppLanguage.HINDI) "कन्फर्म" else "Confirmed"),
+        OrderStatus.PACKED to (if (lang == AppLanguage.HINDI) "पैक" else "Packed"),
+        OrderStatus.OUT_FOR_DELIVERY to (if (lang == AppLanguage.HINDI) "रास्ते में" else "Out"),
+        OrderStatus.DELIVERED to (if (lang == AppLanguage.HINDI) "डिलीवर" else "Delivered")
+    )
+    val activeIdx = steps.indexOfFirst { it.first == status }.coerceAtLeast(0)
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            steps.forEachIndexed { idx, (_, _) ->
+                val reached = idx <= activeIdx
+                Surface(
+                    shape = CircleShape,
+                    color = if (reached) VerifiedGreen else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (reached) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "${idx + 1}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                if (idx < steps.lastIndex) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(3.dp)
+                            .background(
+                                if (idx < activeIdx) VerifiedGreen else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            steps.forEachIndexed { idx, (_, stepLabel) ->
+                val reached = idx <= activeIdx
+                Text(
+                    text = stepLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (idx == activeIdx) FontWeight.Bold else FontWeight.Normal,
+                    color = if (reached) VerifiedGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun OrderConfirmationCard(
     order: CustomerOrder,
     settings: StoreSettings,
@@ -500,32 +662,31 @@ fun OrderConfirmationCard(
             Column(
                 modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Icon(
                     Icons.Filled.CheckCircle,
                     contentDescription = null,
                     tint = VerifiedGreen,
-                    modifier = Modifier.size(54.dp)
+                    modifier = Modifier.size(56.dp)
                 )
                 Text(
-                    text = if (lang == AppLanguage.HINDI) "ऑर्डर सफलतापूर्वक दर्ज हो गया!" else "Order Saved & Confirmed!",
+                    text = if (lang == AppLanguage.HINDI) "ऑर्डर दुकानदार के पास लाइव पहुँच गया!" else "Order Placed & Sent Live to Shop!",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
                 )
                 Text(
                     text = "Order Ref: ${order.orderReference}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+                OrderTrackingStepper(status = order.statusEnum(), lang = lang)
                 Text(
                     text = "${order.itemSummary} • Total: ${formatInr(order.totalPayableInr)}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Text(
-                    text = "Status: ${order.statusEnum().label(lang)} | Payment: ${order.paymentStatusEnum().label(lang)}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
                 )
 
                 if (order.paymentMethodEnum() == PaymentMethodType.UPI_QR && settings.isUpiConfiguredAndActive) {
@@ -548,11 +709,6 @@ fun OrderConfirmationCard(
                         style = MaterialTheme.typography.bodySmall
                     )
                     QrMatrixView(payload = upiUri, qrSize = 190.dp)
-                    Text(
-                        text = "Always verify recipient name (${settings.merchantPayeeName}) in your UPI app before entering PIN on your bank screen. Never share your UPI PIN with anyone. Payment remains 'Pending Verification' until confirmed by the shop owner.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     Button(
                         onClick = {
                             UpiPaymentHelper.launchUpiApp(context, upiUri) {
@@ -575,7 +731,7 @@ fun OrderConfirmationCard(
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = WhatsAppGreen,
-                        contentColor = androidx.compose.ui.graphics.Color.White
+                        contentColor = Color.White
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -586,9 +742,9 @@ fun OrderConfirmationCard(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         if (lang == AppLanguage.HINDI) {
-                            "व्हाट्सऐप पर दुकानदार को ऑर्डर भेजें (${settings.whatsappNumber})"
+                            "व्हाट्सऐप पर दुकानदार को तुरंत सूचित करें (${settings.whatsappNumber})"
                         } else {
-                            "Send Full Order on WhatsApp (${settings.whatsappNumber})"
+                            "Send Instant Alert on WhatsApp (${settings.whatsappNumber})"
                         }
                     )
                 }
@@ -632,12 +788,16 @@ fun CustomerOrdersTab(
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = if (lang == AppLanguage.HINDI) "मेरे ऑर्डर और बिल (My Orders)" else "My Orders & Printable Bills",
+            text = if (lang == AppLanguage.HINDI) "मेरे ऑर्डर और लाइव ट्रैकिंग (My Orders)" else "My Orders & Live Tracking",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            text = if (lang == AppLanguage.HINDI) "इस फ़ोन से किए गए आपके सभी ऑर्डर और बिल यहाँ सुरक्षित रहते हैं।" else "All orders placed on this phone and their printable bills are saved here.",
+            text = if (lang == AppLanguage.HINDI) {
+                "जैसे ही दुकानदार आपका ऑर्डर कन्फर्म या पैक करेंगे, स्थिति यहाँ अपने आप लाइव अपडेट होगी।"
+            } else {
+                "Order status updates here automatically in real time as the shop confirms, packs, and delivers."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -662,13 +822,21 @@ fun CustomerOrdersTab(
                 if (list.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.secondary)
+                            Icon(
+                                Icons.AutoMirrored.Filled.ReceiptLong,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
                             Spacer(Modifier.height(8.dp))
                             Text(if (lang == AppLanguage.HINDI) "अभी कोई ऑर्डर नहीं है" else "No orders found yet")
                         }
                     }
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
                         items(list, key = { it.id }) { order ->
                             val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
                                 .format(order.createdAtDate())
@@ -676,29 +844,38 @@ fun CustomerOrdersTab(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                             ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(order.orderReference, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(
+                                            order.orderReference,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                         Text(dateStr, style = MaterialTheme.typography.labelSmall)
                                     }
+
+                                    // Flipkart-Style 5-Step Live Progress Stepper
+                                    OrderTrackingStepper(
+                                        status = order.statusEnum(),
+                                        lang = lang
+                                    )
+
                                     Text(order.itemSummary, style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         text = "Total: ${formatInr(order.totalPayableInr)} • ${order.paymentMethodEnum().label(lang)}",
-                                        style = MaterialTheme.typography.titleSmall
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Surface(
-                                            color = if (order.statusEnum() == OrderStatus.CANCELLED) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                text = "Order: ${order.statusEnum().label(lang)}",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                        Surface(
-                                            color = if (order.paymentStatusEnum() == PaymentStatus.VERIFIED_PAID) VerifiedGreen.copy(alpha = 0.16f) else MaterialTheme.colorScheme.secondaryContainer,
+                                            color = if (order.paymentStatusEnum() == PaymentStatus.VERIFIED_PAID) {
+                                                VerifiedGreen.copy(alpha = 0.16f)
+                                            } else {
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            },
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(
@@ -709,12 +886,20 @@ fun CustomerOrdersTab(
                                         }
                                     }
                                     if (order.cancellationReason.isNotBlank()) {
-                                        Text("Note: ${order.cancellationReason}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                        Text(
+                                            "Note: ${order.cancellationReason}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         OutlinedButton(
                                             onClick = {
-                                                InvoicePrintHelper.printInvoice(context, settings, InvoicePrintHelper.fromCustomerOrder(order))
+                                                InvoicePrintHelper.printInvoice(
+                                                    context,
+                                                    settings,
+                                                    InvoicePrintHelper.fromCustomerOrder(order)
+                                                )
                                             }
                                         ) {
                                             Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -727,7 +912,7 @@ fun CustomerOrdersTab(
                                                 WhatsAppHelper.openWhatsAppChat(context, settings.whatsappNumber, msg)
                                             }
                                         ) {
-                                            Text(if (lang == AppLanguage.HINDI) "व्हाट्सऐप पर भेजें" else "Send on WhatsApp")
+                                            Text(if (lang == AppLanguage.HINDI) "व्हाट्सऐप सहायता" else "WhatsApp Help")
                                         }
                                     }
                                 }

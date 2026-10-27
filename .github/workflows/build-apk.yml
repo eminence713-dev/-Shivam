@@ -74,10 +74,11 @@ jobs:
             echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
           } 2>&1 | tee /tmp/sdk-setup.log
 
-      - name: Prepare Signing Keystore and Env
+      - name: Prepare Signing Keystore, Firebase Config and Env
         shell: bash
         env:
           DEBUG_KEYSTORE_SECRET: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          GOOGLE_SERVICES_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           set -euo pipefail
           {
@@ -96,6 +97,24 @@ jobs:
                 -keysize 2048 \
                 -validity 10000 \
                 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+
+            if [ ! -s "app/google-services.json" ]; then
+              if [ -n "${GOOGLE_SERVICES_SECRET:-}" ]; then
+                if printf '%s' "$GOOGLE_SERVICES_SECRET" | grep -q '{'; then
+                  printf '%s' "$GOOGLE_SERVICES_SECRET" > app/google-services.json
+                else
+                  printf '%s' "$GOOGLE_SERVICES_SECRET" | tr -d '\n\r\t ' | base64 --decode > app/google-services.json
+                fi
+              else
+                {
+                  echo "## ⚠️ Firebase Config Needed (`GOOGLE_SERVICES_JSON`)"
+                  echo "AI Studio सुरक्षा के लिए `app/google-services.json` को GitHub पर सीधे अपलोड नहीं करता।"
+                  echo "1. सबसे आसान तरीका: **AI Studio में ऊपर Settings (⚙️) -> Generate APK** दबाकर सीधा लाइव APK डाउनलोड करें!"
+                  echo "2. या GitHub में `Settings -> Secrets and variables -> Actions -> New repository secret` खोलें, Name में `GOOGLE_SERVICES_JSON` लिखें और AI Studio के `app/google-services.json` का कंटेंट पेस्ट कर दें।"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
             fi
 
             if [ ! -f ".env" ]; then
@@ -135,18 +154,18 @@ jobs:
           gh release delete latest-apk --yes --cleanup-tag 2>/dev/null
           if gh release create latest-apk Shivam-Riya-Mart.apk \
             --target "${{ github.sha }}" \
-            --title "Shri Shivam & Riya Mart — Android App (APK)" \
-            --notes "Tap Shivam-Riya-Mart.apk below under Assets to download and install directly on Android. Opens directly into the shop without any login!"; then
+            --title "Shri Shivam & Riya Mart — Live Cloud Shopping APK" \
+            --notes "Download Shivam-Riya-Mart.apk under Assets. Includes live Flipkart-style multi-phone cloud sync and 1-Tap Google Sign-In."; then
             DL_URL="https://github.com/${{ github.repository }}/releases/download/latest-apk/Shivam-Riya-Mart.apk"
             {
-              echo "## ✅ APK Ready! (आपका ऐप तैयार है — बिना किसी Login झंझट के!)"
+              echo "## ✅ Live Cloud APK Ready! (फ्लिपकार्ट जैसा लाइव सिंक ऐप तैयार है!)"
               echo ""
               echo "### 📲 1-Click Direct APK Download Link:"
               echo "**[$DL_URL]($DL_URL)**"
               echo ""
-              echo "1. **सीधा खुलेगा:** ऐप खोलते ही सीधे **श्री शिवम रेडीमेड & रिया फैंसी शूज़ मार्ट** खुलेगा (कोई Google Login या API Error नहीं)।"
-              echo "2. **ग्राहकों के लिए (WhatsApp पर):** ऊपर दिए लिंक को Copy करके सीधे WhatsApp पर ग्राहकों को भेजें!"
-              echo "3. **मालिक पैनल (Owner Dashboard):** ऊपर ताले (Lock) आइकन पर टैप करके पासवर्ड डालें।"
+              echo "1. **लाइव क्लाउड सिंक:** आप अपने फोन से जो भी नया सामान या दाम डालेंगे, ग्राहक के फोन में 1 सेकंड में लाइव दिखेगा!"
+              echo "2. **ग्राहकों के लिए:** ऊपर दिए लिंक को WhatsApp पर भेजें — ग्राहक 1-Tap Google से खोलकर तुरंत ऑर्डर कर सकते हैं।"
+              echo "3. **मालिक पैनल:** केवल आपके सत्यापित Google अकाउंट (`rajuguptas123@gmail.com` / `eminence713@gmail.com`) में Owner पैनल खुलेगा।"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {

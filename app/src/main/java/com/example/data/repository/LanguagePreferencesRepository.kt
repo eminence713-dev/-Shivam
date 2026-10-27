@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.AppLanguage
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +19,7 @@ class LanguagePreferencesRepository(private val appContext: Context) {
     private val apkDownloadUrlKey = stringPreferencesKey("free_apk_download_url")
     private val ownerPasswordHashKey = stringPreferencesKey("owner_password_sha256")
     private val initialCatalogSeededKey = booleanPreferencesKey("initial_catalog_seeded_v1")
+    private val wishlistIdsKey = stringSetPreferencesKey("customer_wishlist_ids")
 
     val languageFlow: Flow<AppLanguage> = appContext.storeDataStore.data.map { prefs ->
         when (prefs[langKey]) {
@@ -30,6 +32,10 @@ class LanguagePreferencesRepository(private val appContext: Context) {
         prefs[apkDownloadUrlKey].orEmpty()
     }
 
+    val wishlistIdsFlow: Flow<Set<String>> = appContext.storeDataStore.data.map { prefs ->
+        prefs[wishlistIdsKey] ?: emptySet()
+    }
+
     suspend fun setLanguage(language: AppLanguage) {
         appContext.storeDataStore.edit { prefs ->
             prefs[langKey] = language.name
@@ -40,6 +46,22 @@ class LanguagePreferencesRepository(private val appContext: Context) {
         appContext.storeDataStore.edit { prefs ->
             prefs[apkDownloadUrlKey] = url.trim()
         }
+    }
+
+    suspend fun toggleWishlist(productId: String): Boolean {
+        if (productId.isBlank()) return false
+        var added = false
+        appContext.storeDataStore.edit { prefs ->
+            val current = prefs[wishlistIdsKey] ?: emptySet()
+            prefs[wishlistIdsKey] = if (productId in current) {
+                added = false
+                current - productId
+            } else {
+                added = true
+                current + productId
+            }
+        }
+        return added
     }
 
     suspend fun isInitialCatalogSeeded(): Boolean {

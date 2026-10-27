@@ -24,7 +24,8 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isVerifiedOwnerEmail() {
+    // Zero-lookup verified owner token check (safe for both single-doc and list queries)
+    function isOwnerToken() {
       return isSignedIn() &&
              ('email_verified' in request.auth.token) &&
              request.auth.token.email_verified == true &&
@@ -33,9 +34,10 @@ service cloud.firestore {
               request.auth.token.email == 'eminence713@gmail.com');
     }
 
+    // Single-document owner check (combines verified owner email + explicit /admins/{uid} lookup)
     function isOwnerAdmin() {
       return isSignedIn() && (
-        isVerifiedOwnerEmail() ||
+        isOwnerToken() ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -66,13 +68,14 @@ service cloud.firestore {
 
     match /admins/{adminUid} {
       allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isOwnerAdmin());
-      allow list: if isOwnerAdmin();
-      allow create: if isOwnerAdmin() &&
+      allow list: if isOwnerToken() && existing().uid is string;
+      allow create: if isSignedIn() &&
                        isValidId(adminUid) &&
                        incoming().keys().hasAll(['uid', 'email', 'createdAt']) &&
                        incoming().keys().hasOnly(['uid', 'email', 'createdAt']) &&
                        incoming().uid == adminUid &&
-                       isValidAdminRecord(incoming());
+                       isValidAdminRecord(incoming()) &&
+                       isOwnerAdmin();
       allow update, delete: if false;
     }
 
@@ -193,7 +196,7 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow get: if isSignedIn() && isValidId(productId) && ((resource != null && existing().isPublished == true) || isOwnerAdmin());
-      allow list: if isSignedIn() && (existing().isPublished == true || isOwnerAdmin());
+      allow list: if isSignedIn() && (existing().isPublished == true || isOwnerToken());
 
       allow create: if isSignedIn() &&
                        isValidId(productId) &&
@@ -245,7 +248,7 @@ service cloud.firestore {
 
     match /product_costs/{productId} {
       allow get: if isOwnerAdmin() && isValidId(productId);
-      allow list: if isOwnerAdmin();
+      allow list: if isOwnerToken() && existing().productId is string;
 
       allow create: if isSignedIn() &&
                        isValidId(productId) &&
@@ -301,7 +304,7 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow get: if isSignedIn() && isValidId(orderId) && (resource == null || existing().customerId == request.auth.uid || isOwnerAdmin());
-      allow list: if isSignedIn() && (existing().customerId == request.auth.uid || isOwnerAdmin());
+      allow list: if isSignedIn() && (existing().customerId == request.auth.uid || isOwnerToken());
 
       allow create: if isSignedIn() &&
                        isValidId(orderId) &&
@@ -339,6 +342,7 @@ service cloud.firestore {
                          'deliveryChargeInr', 'totalPayableInr', 'cancellationReason',
                          'invoiceNumber', 'updatedAt'
                        ]) &&
+                       (!(existing().orderStatus in ['DELIVERED', 'CANCELLED']) || isOwnerAdmin()) &&
                        isOwnerAdmin();
 
       allow delete: if false;
@@ -365,7 +369,7 @@ service cloud.firestore {
 
     match /offline_sales/{saleId} {
       allow get: if isOwnerAdmin() && isValidId(saleId);
-      allow list: if isOwnerAdmin();
+      allow list: if isOwnerToken() && existing().recordedBy is string;
 
       allow create: if isSignedIn() &&
                        isValidId(saleId) &&
@@ -403,7 +407,7 @@ service cloud.firestore {
 
     match /expenses/{expenseId} {
       allow get: if isOwnerAdmin() && isValidId(expenseId);
-      allow list: if isOwnerAdmin();
+      allow list: if isOwnerToken() && existing().recordedBy is string;
 
       allow create: if isSignedIn() &&
                        isValidId(expenseId) &&
@@ -443,7 +447,7 @@ service cloud.firestore {
 
     match /inventory_movements/{movementId} {
       allow get: if isOwnerAdmin() && isValidId(movementId);
-      allow list: if isOwnerAdmin();
+      allow list: if isOwnerToken() && existing().actorId is string;
 
       allow create: if isSignedIn() &&
                        isValidId(movementId) &&

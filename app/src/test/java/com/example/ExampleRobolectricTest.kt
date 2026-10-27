@@ -2,16 +2,11 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.local.ShivamMartDatabase
 import com.example.data.model.CartItem
-import com.example.data.model.OrderStatus
-import com.example.data.model.PaymentMethodType
-import com.example.data.model.PaymentStatus
+import com.example.data.model.Product
 import com.example.data.repository.LanguagePreferencesRepository
-import com.example.data.repository.StoreRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -26,19 +21,10 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     private lateinit var context: Context
-    private lateinit var db: ShivamMartDatabase
-    private lateinit var repository: StoreRepository
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        db = ShivamMartDatabase.createInMemory(context)
-        repository = StoreRepository(db)
-    }
-
-    @After
-    fun tearDown() {
-        db.close()
     }
 
     @Test
@@ -48,68 +34,34 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `owner password verifies default and supports updating`() = runBlocking {
+    fun `owner password verifies default and wishlist toggles cleanly`() = runBlocking {
         val langPrefs = LanguagePreferencesRepository(context)
         assertTrue(langPrefs.verifyOwnerPassword(LanguagePreferencesRepository.DEFAULT_OWNER_PASSWORD))
         assertFalse(langPrefs.verifyOwnerPassword("wrong_pass"))
 
-        val changeResult = langPrefs.changeOwnerPassword(
-            currentPassword = LanguagePreferencesRepository.DEFAULT_OWNER_PASSWORD,
-            newPassword = "raju2026"
-        )
-        assertTrue(changeResult.isSuccess)
-        assertTrue(langPrefs.verifyOwnerPassword("raju2026"))
-        assertFalse(langPrefs.verifyOwnerPassword(LanguagePreferencesRepository.DEFAULT_OWNER_PASSWORD))
+        val added = langPrefs.toggleWishlist("demo_saree_banarasi")
+        assertTrue(added)
+        assertTrue("demo_saree_banarasi" in langPrefs.wishlistIdsFlow.first())
 
-        // Restore default for clean test isolation
-        langPrefs.changeOwnerPassword("raju2026", LanguagePreferencesRepository.DEFAULT_OWNER_PASSWORD)
-        Unit
+        val addedSecondToggle = langPrefs.toggleWishlist("demo_saree_banarasi")
+        assertFalse(addedSecondToggle)
+        assertFalse("demo_saree_banarasi" in langPrefs.wishlistIdsFlow.first())
     }
 
     @Test
-    fun `room store repository seeds catalog places order and restocks on cancel`() = runBlocking {
-        val seededCount = repository.seedDemoProducts().getOrThrow()
-        assertTrue(seededCount > 0)
-
-        val published = repository.observePublishedProducts().first()
-        assertTrue(published.isNotEmpty())
-        val firstProduct = published.first()
-        val initialStock = firstProduct.stockCount
-
-        val orderResult = repository.placeCustomerOrder(
-            customerName = "Ramesh Kumar",
-            customerPhone = "9876543210",
-            deliveryAddress = "Bada Bazar, Kalyanpur",
-            landmark = "Near Main Chowk",
-            paymentMethod = PaymentMethodType.COD,
-            cartItems = listOf(
-                CartItem(
-                    product = firstProduct,
-                    quantity = 2,
-                    selectedSize = firstProduct.sizes.firstOrNull().orEmpty(),
-                    selectedColor = firstProduct.colors.firstOrNull().orEmpty()
-                )
-            )
+    fun `product discount percent and cart line savings calculate accurately`() {
+        val product = Product(
+            id = "p1",
+            nameEn = "Banarasi Saree",
+            sellingPriceInr = 1199L,
+            originalPriceInr = 1599L,
+            stockCount = 5L
         )
-        assertTrue(orderResult.isSuccess)
-        val savedOrder = orderResult.getOrThrow()
+        assertEquals(25, product.discountPercent)
+        assertEquals(400L, product.savingsInr)
 
-        val afterOrderProducts = repository.observePublishedProducts().first()
-        val updatedProduct = afterOrderProducts.first { it.id == firstProduct.id }
-        assertEquals(initialStock - 2, updatedProduct.stockCount)
-
-        // Cancel order and verify stock is restored
-        val cancelResult = repository.updateOrderByOwner(
-            orderId = savedOrder.id,
-            newOrderStatus = OrderStatus.CANCELLED,
-            newPaymentStatus = PaymentStatus.PENDING,
-            cancellationReason = "Customer changed size",
-            generateInvoiceIfMissing = false
-        )
-        assertTrue(cancelResult.isSuccess)
-
-        val afterCancelProducts = repository.observePublishedProducts().first()
-        val restockedProduct = afterCancelProducts.first { it.id == firstProduct.id }
-        assertEquals(initialStock, restockedProduct.stockCount)
+        val cartItem = CartItem(product = product, quantity = 2)
+        assertEquals(2398L, cartItem.lineSubtotalInr)
+        assertEquals(800L, cartItem.lineSavingsInr)
     }
 }

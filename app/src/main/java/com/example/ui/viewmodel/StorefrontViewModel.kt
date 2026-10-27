@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.AppLanguage
 import com.example.data.model.CartItem
 import com.example.data.model.CustomerOrder
+import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethodType
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -30,7 +32,8 @@ sealed interface UiState<out T> {
 }
 
 enum class SortOption(val labelEn: String, val labelHi: String) {
-    NEWEST("Newest Arrivals", "नए उत्पाद पहले"),
+    NEWEST("Newest First", "नए उत्पाद पहले"),
+    DISCOUNT_HIGH_LOW("Discount: High to Low", "सबसे ज़्यादा छूट (%)"),
     PRICE_LOW_HIGH("Price: Low to High", "कीमत: कम से ज़्यादा"),
     PRICE_HIGH_LOW("Price: High to Low", "कीमत: ज़्यादा से कम");
 
@@ -40,11 +43,16 @@ enum class SortOption(val labelEn: String, val labelHi: String) {
 
 class StorefrontViewModel(
     private val repository: StoreRepository,
-    private val langPrefs: LanguagePreferencesRepository
+    private val langPrefs: LanguagePreferencesRepository,
+    private val currentUserId: String,
+    private val isAuthorizedOwner: Boolean
 ) : ViewModel() {
 
     val language: StateFlow<AppLanguage> = langPrefs.languageFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), AppLanguage.ENGLISH)
+
+    val wishlistIds: StateFlow<Set<String>> = langPrefs.wishlistIdsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
 
     val storeSettings: StateFlow<StoreSettings> = repository.observeStoreSettings()
         .catch { e ->
@@ -63,7 +71,7 @@ class StorefrontViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
-    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeCustomerOrders()
+    val customerOrdersState: StateFlow<UiState<List<CustomerOrder>>> = repository.observeCustomerOrders(currentUserId)
         .map<List<CustomerOrder>, UiState<List<CustomerOrder>>> { list ->
             UiState.Success(list.sortedByDescending { it.createdAtMillis })
         }
@@ -73,6 +81,16 @@ class StorefrontViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
+    val pendingOwnerOrdersCount: StateFlow<Int> = (
+        if (isAuthorizedOwner) {
+            repository.observeAllOrdersForOwner()
+                .map { orders -> orders.count { it.statusEnum() == OrderStatus.PENDING } }
+                .catch { emit(0) }
+        } else {
+            emptyFlow()
+        }
+        ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), 0)
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
@@ -81,6 +99,9 @@ class StorefrontViewModel(
 
     private val _sortOption = MutableStateFlow(SortOption.NEWEST)
     val sortOption: StateFlow<SortOption> = _sortOption.asStateFlow()
+
+    private val _showWishlistOnly = MutableStateFlow(false)
+    val showWishlistOnly: StateFlow<Boolean> = _showWishlistOnly.asStateFlow()
 
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
@@ -100,11 +121,13 @@ class StorefrontViewModel(
     private var activeCheckoutIdempotencyId: String? = null
 
     init {
-        viewModelScope.launch {
-            runCatching {
-                repository.ensureInitialCatalogSeeded(langPrefs)
-            }.onFailure { e ->
-                Log.w(TAG, "Error seeding initial catalog", e)
+        if (isAuthorizedOwner) {
+            viewModelScope.launch {
+                runCatching {
+                    repository.ensureInitialCatalogSeededForOwner()
+                }.onFailure { e ->
+                    Log.w(TAG, "Error checking/seeding initial cloud catalog", e)
+                }
             }
         }
     }
@@ -112,6 +135,22 @@ class StorefrontViewModel(
     fun toggleLanguage() {
         val next = if (language.value == AppLanguage.ENGLISH) AppLanguage.HINDI else AppLanguage.ENGLISH
         viewModelScope.launch { langPrefs.setLanguage(next) }
+    }
+
+    fun toggleWishlist(product: Product) {
+        viewModelScope.launch {
+            val added = langPrefs.toggleWishlist(product.id)
+            val lang = language.value
+            _toastMessage.value = if (added) {
+                if (lang == AppLanguage.HINDI) "विशलिस्ट में जोड़ा गया ♥" else "Added to Wishlist ♥"
+            } else {
+                if (lang == AppLanguage.HINDI) "विशलिस्ट से हटाया गया" else "Removed from Wishlist"
+            }
+        }
+    }
+
+    fun setShowWishlistOnly(onlyWishlist: Boolean) {
+        _showWishlistOnly.value = onlyWishlist
     }
 
     fun updateSearchQuery(query: String) {

@@ -21,9 +21,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Badge
@@ -117,10 +121,15 @@ fun StoreTopBar(
     storeNameHi: String,
     lang: AppLanguage,
     cartCount: Int,
-    isOwnerUnlocked: Boolean,
+    wishlistCount: Int = 0,
+    showOwnerButton: Boolean = false,
+    isOwnerUnlocked: Boolean = false,
+    pendingOwnerOrdersCount: Int = 0,
     onToggleLanguage: () -> Unit,
+    onOpenWishlist: () -> Unit = {},
     onOpenCart: () -> Unit,
-    onOwnerClick: () -> Unit
+    onOwnerClick: () -> Unit,
+    onAccountClick: () -> Unit = {}
 ) {
     Surface(
         color = MaterialTheme.colorScheme.primary,
@@ -130,46 +139,68 @@ fun StoreTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StoreLogoCrest(size = 42.dp)
-            Spacer(Modifier.width(10.dp))
+            StoreLogoCrest(size = 40.dp)
+            Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (lang == AppLanguage.HINDI) storeNameHi else "श्री $storeNameEn",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimary,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = if (lang == AppLanguage.HINDI) "बड़ा बाज़ार, कल्याणपुर, मोतिहारी" else "Bada Bazar, Kalyanpur, Motihari",
+                    text = if (lang == AppLanguage.HINDI) "कल्याणपुर, मोतिहारी • लाइव स्टोर" else "Kalyanpur, Motihari • Live Store",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.width(6.dp))
             FilledTonalButton(
                 onClick = onToggleLanguage,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(36.dp)
                     .testTag("language_switch_button")
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Translate,
                     contentDescription = stringResource(R.string.cd_language_switch),
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(14.dp)
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(3.dp))
                 Text(
                     text = if (lang == AppLanguage.HINDI) "EN" else "हिंदी",
-                    style = MaterialTheme.typography.labelLarge
+                    style = MaterialTheme.typography.labelMedium
                 )
+            }
+            IconButton(
+                onClick = onOpenWishlist,
+                modifier = Modifier.testTag("top_wishlist_button")
+            ) {
+                BadgedBox(
+                    badge = {
+                        if (wishlistCount > 0) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            ) {
+                                Text("$wishlistCount")
+                            }
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (wishlistCount > 0) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = "Wishlist",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
             IconButton(
                 onClick = onOpenCart,
@@ -194,14 +225,34 @@ fun StoreTopBar(
                     )
                 }
             }
+            if (showOwnerButton) {
+                IconButton(
+                    onClick = onOwnerClick,
+                    modifier = Modifier.testTag("owner_access_button")
+                ) {
+                    BadgedBox(
+                        badge = {
+                            if (pendingOwnerOrdersCount > 0) {
+                                Badge { Text("$pendingOwnerOrdersCount") }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = if (isOwnerUnlocked) Icons.Outlined.AdminPanelSettings else Icons.Outlined.Lock,
+                            contentDescription = stringResource(R.string.cd_owner_dashboard),
+                            tint = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    }
+                }
+            }
             IconButton(
-                onClick = onOwnerClick,
-                modifier = Modifier.testTag("owner_access_button")
+                onClick = onAccountClick,
+                modifier = Modifier.testTag("top_account_button")
             ) {
                 Icon(
-                    imageVector = if (isOwnerUnlocked) Icons.Outlined.AdminPanelSettings else Icons.Outlined.Lock,
-                    contentDescription = stringResource(R.string.cd_owner_dashboard),
-                    tint = if (isOwnerUnlocked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                    imageVector = Icons.Filled.AccountCircle,
+                    contentDescription = "Account & Sign Out",
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
         }
@@ -225,6 +276,8 @@ fun categoryFallbackDrawable(category: ProductCategory): Int = when (category) {
 fun ProductVisualImage(
     product: Product,
     lang: AppLanguage,
+    isWishlisted: Boolean = false,
+    onToggleWishlist: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val decodedBitmap = remember(product.imageBase64) {
@@ -264,10 +317,55 @@ fun ProductVisualImage(
             }
         }
 
-        // Stock badge
+        // Top-Left Flipkart-style % OFF Discount Badge
+        if (product.discountPercent > 0) {
+            Surface(
+                color = VerifiedGreen,
+                contentColor = Color.White,
+                shape = RoundedCornerShape(bottomEnd = 10.dp),
+                modifier = Modifier.align(Alignment.TopStart)
+            ) {
+                Text(
+                    text = "${product.discountPercent}% OFF",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        // Top-Right Wishlist Heart Button
+        if (onToggleWishlist != null) {
+            Surface(
+                shape = CircleShape,
+                color = Color.White.copy(alpha = 0.90f),
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleWishlist)
+                    .testTag("wishlist_toggle_${product.id}")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isWishlisted) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (isWishlisted) "Remove from wishlist" else "Add to wishlist",
+                        tint = if (isWishlisted) Color(0xFFD32F2F) else Color(0xFF5C4B4E),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Bottom-End Stock Urgency Badge
         val (stockText, stockBg) = when {
             product.isOutOfStock -> AppStrings.outOfStock.get(lang) to MaterialTheme.colorScheme.error
-            product.isLowStock -> "${AppStrings.lowStock.get(lang)} (${product.stockCount})" to WarningAmber
+            product.isLowStock -> {
+                val label = if (lang == AppLanguage.HINDI) "केवल ${product.stockCount} बचे!" else "Only ${product.stockCount} left!"
+                label to WarningAmber
+            }
             else -> AppStrings.inStock.get(lang) to VerifiedGreen
         }
         Surface(
@@ -286,9 +384,40 @@ fun ProductVisualImage(
 }
 
 @Composable
+fun ShivamAssuredBadge(lang: AppLanguage, modifier: Modifier = Modifier) {
+    Surface(
+        color = Color(0xFFFBF2DC),
+        border = BorderStroke(1.dp, AntiqueGold.copy(alpha = 0.65f)),
+        shape = RoundedCornerShape(6.dp),
+        modifier = modifier
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Verified,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(12.dp)
+            )
+            Spacer(Modifier.width(3.dp))
+            Text(
+                text = if (lang == AppLanguage.HINDI) "शिवम एश्योर्ड" else "Shivam Assured",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
 fun ProductGridCard(
     product: Product,
     lang: AppLanguage,
+    isWishlisted: Boolean = false,
+    onToggleWishlist: (() -> Unit)? = null,
     onClick: () -> Unit,
     onQuickAdd: () -> Unit,
     modifier: Modifier = Modifier
@@ -299,25 +428,37 @@ fun ProductGridCard(
             .clickable(onClick = onClick)
             .testTag("product_card_${product.id}"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.40f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column {
             ProductVisualImage(
                 product = product,
                 lang = lang,
+                isWishlisted = isWishlisted,
+                onToggleWishlist = onToggleWishlist,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(4f / 3f)
             )
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = product.categoryEnum().label(lang),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(2.dp))
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = product.categoryEnum().label(lang),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ShivamAssuredBadge(lang = lang)
+                }
+                Spacer(Modifier.height(4.dp))
                 Text(
                     text = product.displayName(lang),
                     style = MaterialTheme.typography.titleSmall,
@@ -331,19 +472,42 @@ fun ProductGridCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column {
-                        Text(
-                            text = formatInr(product.sellingPriceInr),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        if (product.originalPriceInr > product.sellingPriceInr) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Text(
-                                text = formatInr(product.originalPriceInr),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textDecoration = TextDecoration.LineThrough
+                                text = formatInr(product.sellingPriceInr),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (product.originalPriceInr > product.sellingPriceInr) {
+                                Text(
+                                    text = formatInr(product.originalPriceInr),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
+                        }
+                        if (product.savingsInr > 0L) {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) {
+                                    "${formatInr(product.savingsInr)} की बचत"
+                                } else {
+                                    "Save ${formatInr(product.savingsInr)}"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = VerifiedGreen
+                            )
+                        } else {
+                            Text(
+                                text = if (lang == AppLanguage.HINDI) "COD उपलब्ध" else "COD Available",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

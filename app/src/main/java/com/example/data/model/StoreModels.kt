@@ -151,6 +151,16 @@ data class Product(
 
     val isOutOfStock: Boolean
         get() = stockCount <= 0L
+
+    val discountPercent: Int
+        get() = if (originalPriceInr > sellingPriceInr && originalPriceInr > 0L) {
+            (((originalPriceInr - sellingPriceInr) * 100L) / originalPriceInr).toInt().coerceIn(1, 95)
+        } else {
+            0
+        }
+
+    val savingsInr: Long
+        get() = (originalPriceInr - sellingPriceInr).coerceAtLeast(0L)
 }
 
 data class ProductCost(
@@ -173,6 +183,12 @@ data class CartItem(
 
     val lineSubtotalInr: Long
         get() = product.sellingPriceInr * quantity.toLong()
+
+    val lineOriginalTotalInr: Long
+        get() = product.originalPriceInr.coerceAtLeast(product.sellingPriceInr) * quantity.toLong()
+
+    val lineSavingsInr: Long
+        get() = (lineOriginalTotalInr - lineSubtotalInr).coerceAtLeast(0L)
 }
 
 data class OrderLineItem(
