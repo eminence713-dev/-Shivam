@@ -24,35 +24,108 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Configure Android SDK and Licenses
+      - name: Install Android SDK (API 36.1 & Build Tools 36.0.0)
         shell: bash
         run: |
           set -euo pipefail
-          SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          if [ ! -d "$SDK_DIR" ]; then
+          {
             SDK_DIR="$HOME/android-sdk"
-            mkdir -p "$SDK_DIR/cmdline-tools"
+            rm -rf "$SDK_DIR"
+            mkdir -p "$SDK_DIR/cmdline-tools" "$SDK_DIR/licenses"
+
+            printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$SDK_DIR/licenses/android-sdk-license"
+            printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "$SDK_DIR/licenses/android-sdk-preview-license"
+
             curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
             unzip -q /tmp/cmdtools.zip -d "$SDK_DIR/cmdline-tools"
-            mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
-          fi
-          sudo mkdir -p "$SDK_DIR/licenses" "$SDK_DIR/platforms" "$SDK_DIR/build-tools"
-          sudo chmod -R 777 "$SDK_DIR" || true
-          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$SDK_DIR/licenses/android-sdk-license"
-          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "$SDK_DIR/licenses/android-sdk-preview-license"
-          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+            mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/bootstrap"
 
-      - name: Prepare Signing Keystore and Env Defaults
+            set +o pipefail
+            yes | "$SDK_DIR/cmdline-tools/bootstrap/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+            set -o pipefail
+
+            "$SDK_DIR/cmdline-tools/bootstrap/bin/sdkmanager" --sdk_root="$SDK_DIR" --install "cmdline-tools;latest"
+
+            SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+            if [ ! -x "$SDKMANAGER" ]; then
+              SDKMANAGER="$SDK_DIR/cmdline-tools/bootstrap/bin/sdkmanager"
+            fi
+
+            set +o pipefail
+            yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+            set -o pipefail
+
+            "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "platform-tools" "build-tools;36.0.0" "platforms;android-36"
+            "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "platforms;android-36.1" || true
+
+            if [ ! -d "$SDK_DIR/platforms/android-36.1" ] && [ -d "$SDK_DIR/platforms/android-36" ]; then
+              cp -R "$SDK_DIR/platforms/android-36" "$SDK_DIR/platforms/android-36.1"
+              sed -i 's/^AndroidVersion.ApiLevel=.*/AndroidVersion.ApiLevel=36.1/' "$SDK_DIR/platforms/android-36.1/source.properties"
+              if ! grep -q "^AndroidVersion.ApiLevel=" "$SDK_DIR/platforms/android-36.1/source.properties"; then
+                echo "AndroidVersion.ApiLevel=36.1" >> "$SDK_DIR/platforms/android-36.1/source.properties"
+              fi
+              if [ -f "$SDK_DIR/platforms/android-36.1/package.xml" ]; then
+                sed -i 's/platforms;android-36"/platforms;android-36.1"/g' "$SDK_DIR/platforms/android-36.1/package.xml"
+                sed -i 's/<api-level>36<\/api-level>/<api-level>36.1<\/api-level>/g' "$SDK_DIR/platforms/android-36.1/package.xml"
+              fi
+            fi
+
+            echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          } 2>&1 | tee /tmp/sdk-setup.log
+
+      - name: Prepare Signing Keystore, Env, and Firebase Config
         shell: bash
+        env:
+          GOOGLE_SERVICES_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          DEBUG_KEYSTORE_SECRET: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -f "debug.keystore.base64" ]; then
-            tr -d '\n\r ' < debug.keystore.base64 | base64 --decode > debug.keystore
-          fi
-          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
-            cp .env.example .env
-          fi
+          {
+            # 1. Prepare debug.keystore
+            if [ -s "debug.keystore.base64" ]; then
+              tr -d '\n\r\t ' < debug.keystore.base64 | base64 --decode > debug.keystore
+            elif [ -n "${DEBUG_KEYSTORE_SECRET:-}" ]; then
+              printf '%s' "$DEBUG_KEYSTORE_SECRET" | tr -d '\n\r\t ' | base64 --decode > debug.keystore
+            fi
+            if [ ! -s "debug.keystore" ]; then
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+
+            # 2. Prepare .env file for Secrets Gradle Plugin
+            if [ ! -f ".env" ]; then
+              if [ -f ".env.example" ]; then
+                cp .env.example .env
+              else
+                touch .env
+              fi
+            fi
+
+            # 3. Ensure app/google-services.json has required client_type 3 entry
+            if [ -n "${GOOGLE_SERVICES_SECRET:-}" ]; then
+              if printf '%s' "$GOOGLE_SERVICES_SECRET" | grep -q '{'; then
+                printf '%s\n' "$GOOGLE_SERVICES_SECRET" > app/google-services.json
+              else
+                printf '%s' "$GOOGLE_SERVICES_SECRET" | tr -d '\n\r\t ' | base64 --decode > app/google-services.json
+              fi
+              echo "FIREBASE_STATUS=live_secret" >> "$GITHUB_ENV"
+            elif [ -s "app/google-services.json" ] \
+              && ! grep -q '"remixed-project-id"' app/google-services.json \
+              && grep -q '"client_type"[[:space:]]*:[[:space:]]*3' app/google-services.json; then
+              echo "FIREBASE_STATUS=live_repo" >> "$GITHUB_ENV"
+            else
+              python3 -c 'import json; open("app/google-services.json", "w").write(json.dumps({"project_info":{"project_number":"000000000000","project_id":"ci-build-placeholder","storage_bucket":"ci-build-placeholder.firebasestorage.app"},"client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000000000","android_client_info":{"package_name":"com.aistudio.shivammart.kqvzpx"}},"oauth_client":[{"client_id":"ci-placeholder-server-client-id","client_type":3}],"api_key":[{"current_key":"AIzaSyCiPlaceholderBuildKey000000000000"}],"services":{"appinvite_service":{"other_platform_oauth_client":[{"client_id":"ci-placeholder-server-client-id","client_type":3}]}}}],"configuration_version":"1"}, indent=2))'
+              echo "FIREBASE_STATUS=ci_placeholder" >> "$GITHUB_ENV"
+            fi
+          } 2>&1 | tee /tmp/prepare-config.log
 
       - name: Install Gradle 9.3.1 and Build APK
         shell: bash
@@ -60,23 +133,20 @@ jobs:
           set -eo pipefail
           curl -fsSL https://services.gradle.org/distributions/gradle-9.3.1-bin.zip -o /tmp/gradle-9.3.1-bin.zip
           unzip -q /tmp/gradle-9.3.1-bin.zip -d /tmp
-          if ! /tmp/gradle-9.3.1/bin/gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-build.log; then
-            echo "### ❌ Gradle Build Error Details" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            tail -n 60 /tmp/gradle-build.log >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          /tmp/gradle-9.3.1/bin/gradle :app:assembleDebug \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace 2>&1 | tee /tmp/gradle-build.log
           cp app/build/outputs/apk/debug/app-debug.apk Shivam-Riya-Mart.apk
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Direct APK Artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: Shivam-Riya-Mart-APK
           path: Shivam-Riya-Mart.apk
+          archive: false
           if-no-files-found: error
 
-      - name: Publish Direct Download APK Release
+      - name: Publish 1-Click Download APK Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,6 +154,7 @@ jobs:
           set +e
           gh release delete latest-apk --yes --cleanup-tag 2>/dev/null
           if gh release create latest-apk Shivam-Riya-Mart.apk \
+            --target "${{ github.sha }}" \
             --title "Shri Shivam & Riya Mart — Android App (APK)" \
             --notes "Tap Shivam-Riya-Mart.apk below under Assets to download and install directly on Android."; then
             DL_URL="https://github.com/${{ github.repository }}/releases/download/latest-apk/Shivam-Riya-Mart.apk"
@@ -93,12 +164,40 @@ jobs:
               echo "### 📲 1-Click Direct APK Download Link:"
               echo "**[$DL_URL]($DL_URL)**"
               echo ""
-              echo "1. **अपने फ़ोन के लिए:** ऊपर दिए नीले लिंक पर टैप करें → डाउनलोड करके Install करें।"
-              echo "2. **ग्राहकों के लिए:** ऊपर दिए लिंक को Copy करके अपने ऐप के Owner Dashboard में Save करें और WhatsApp पर शेयर करें!"
+              echo "1. **अपने फ़ोन के लिए:** ऊपर दिए नीले लिंक पर टैप करें → डाउनलोड करके **Install** करें।"
+              echo "2. **ग्राहकों के लिए (WhatsApp पर):** ऊपर दिए लिंक को Copy करके सीधे WhatsApp पर ग्राहकों को भेजें या अपने ऐप के **Owner Dashboard** में Save करें!"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
-              echo "## ✅ APK Built in Artifacts!"
-              echo "Scroll down to **Artifacts** below and tap **Shivam-Riya-Mart-APK** to download."
+              echo "## ✅ APK Ready in Artifacts!"
+              echo "नीचे **Artifacts** सेक्शन में **Shivam-Riya-Mart.apk** पर टैप करके सीधा APK डाउनलोड करें।"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+          if [ "${FIREBASE_STATUS:-}" = "ci_placeholder" ]; then
+            {
+              echo ""
+              echo "---"
+              echo "### ℹ️ Note: अगर फ़ोन में Google Login करने पर Configuration संदेश दिखे:"
+              echo "AI Studio सुरक्षा के लिए GitHub पर `app/google-services.json` नहीं भेजता है। Live Login जोड़ने के लिए बस 1 बार यह करें:"
+              echo "1. AI Studio के Code एडिटर में `app/google-services.json` खोलकर पूरा Copy करें।"
+              echo "2. GitHub में ऊपर **Settings** → **Secrets and variables** → **Actions** → **New repository secret** पर क्लिक करें।"
+              echo "3. Name में `GOOGLE_SERVICES_JSON` लिखें, Secret में कॉपी किया कोड Paste करके Save करें और **Actions** में जाकर **Re-run all jobs** दबा दें।"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Print Diagnostics on Failure
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "## ❌ Build Diagnostic Log"
+            for f in /tmp/sdk-setup.log /tmp/prepare-config.log /tmp/gradle-build.log; do
+              if [ -f "$f" ]; then
+                echo "### Tail of $(basename "$f")"
+                echo '```'
+                tail -n 60 "$f"
+                echo '```'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
