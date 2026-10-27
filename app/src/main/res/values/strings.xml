@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Shivam &amp; Riya Mart</string>
+    <string name="store_full_name_en">Shri Shivam Readymade &amp; Riya Fancy Shoes Mart</string>
+    <string name="store_full_name_hi">श्री शिवम रेडीमेड एंड रिया फैंसी शूज़ मार्ट</string>
+    <string name="store_address_en">Bada Bazar, Kalyanpur, Motihari, Bihar, India</string>
+    <string name="store_owner_name">Raju Kumar Gupta</string>
+    <string name="cd_store_logo">Shri Shivam Readymade and Riya Fancy Shoes Mart emblem</string>
+    <string name="cd_language_switch">Switch language between English and Hindi</string>
+    <string name="cd_shopping_cart">Open shopping cart</string>
+    <string name="cd_whatsapp_contact">Contact shop on WhatsApp</string>
+    <string name="cd_owner_dashboard">Open Owner Admin Dashboard</string>
+    <string name="btn_sign_in_google">Sign in with Google</string>
+</resources>

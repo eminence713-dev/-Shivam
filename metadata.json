@@ -1,0 +1,6 @@
+{
+  "name": "Shivam & Riya Mart",
+  "description": "Online clothing and footwear store with owner POS, billing, and inventory dashboard for Shri Shivam Readymade & Riya Fancy Shoes Mart, Kalyanpur.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

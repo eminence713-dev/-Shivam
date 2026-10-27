@@ -1,0 +1,71 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Shivam & Riya Mart APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Prepare Keystore and Env Defaults
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            tr -d '\n\r ' < debug.keystore.base64 | base64 --decode > debug.keystore
+          fi
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          fi
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Rename APK for Customers
+        run: cp app/build/outputs/apk/debug/app-debug.apk Shivam-Riya-Mart.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shivam-Riya-Mart-APK
+          path: Shivam-Riya-Mart.apk
+          if-no-files-found: error
+
+      - name: Publish Direct Download APK Release
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: "Shri Shivam & Riya Mart — Android App (APK)"
+          body: |
+            Direct Android APK for **श्री शिवम रेडीमेड & रिया फैंसी शूज़ मार्ट** (Bada Bazar, Kalyanpur, Motihari).
+            Tap **Shivam-Riya-Mart.apk** below under Assets to download and install directly on Android.
+          files: Shivam-Riya-Mart.apk
+          make_latest: true

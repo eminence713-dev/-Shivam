@@ -1,0 +1,305 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "Admin Record",
+      "description": "Explicit owner administrator authorization record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID of the owner." },
+        "email": { "type": "string", "format": "email", "description": "Verified owner email address." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "StoreSettings": {
+      "title": "Store Settings",
+      "description": "Public storefront configuration, delivery rules, return policy, and verified payment recipient details.",
+      "type": "object",
+      "properties": {
+        "storeNameEn": { "type": "string", "description": "Complete English store name." },
+        "storeNameHi": { "type": "string", "description": "Complete Hindi store name." },
+        "ownerName": { "type": "string", "description": "Shop owner full name." },
+        "phone": { "type": "string", "description": "Shop contact phone number." },
+        "whatsappNumber": { "type": "string", "description": "Shop WhatsApp number." },
+        "email": { "type": "string", "format": "email", "description": "Shop contact email." },
+        "addressEn": { "type": "string", "description": "Store address in English." },
+        "addressHi": { "type": "string", "description": "Store address in Hindi." },
+        "promoBannerEn": { "type": "string", "description": "Owner promotional offer text in English." },
+        "promoBannerHi": { "type": "string", "description": "Owner promotional offer text in Hindi." },
+        "deliveryCoverageEn": { "type": "string", "description": "Local delivery area details in English." },
+        "deliveryCoverageHi": { "type": "string", "description": "Local delivery area details in Hindi." },
+        "deliveryChargeInr": { "type": "integer", "description": "Standard delivery fee in INR." },
+        "freeDeliveryThresholdInr": { "type": "integer", "description": "Order value threshold for free delivery (0 if disabled)." },
+        "minOrderAmountInr": { "type": "integer", "description": "Minimum order value in INR (0 if none)." },
+        "expectedDeliveryEn": { "type": "string", "description": "Expected delivery timing in English." },
+        "expectedDeliveryHi": { "type": "string", "description": "Expected delivery timing in Hindi." },
+        "returnPolicyEn": { "type": "string", "description": "Return and exchange rules in English." },
+        "returnPolicyHi": { "type": "string", "description": "Return and exchange rules in Hindi." },
+        "policiesConfirmed": { "type": "boolean", "description": "True once the owner has reviewed and confirmed delivery and return policies." },
+        "codEnabled": { "type": "boolean", "description": "Whether Cash on Delivery is enabled." },
+        "upiEnabled": { "type": "boolean", "description": "Whether verified merchant UPI QR payment is enabled." },
+        "merchantUpiId": { "type": "string", "description": "Owner verified merchant VPA / UPI ID." },
+        "merchantPayeeName": { "type": "string", "description": "Verified recipient display name for UPI." },
+        "updatedBy": { "type": "string", "description": "UID of the owner who last updated settings." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "storeNameEn",
+        "storeNameHi",
+        "ownerName",
+        "phone",
+        "whatsappNumber",
+        "email",
+        "addressEn",
+        "addressHi",
+        "deliveryChargeInr",
+        "freeDeliveryThresholdInr",
+        "minOrderAmountInr",
+        "policiesConfirmed",
+        "codEnabled",
+        "upiEnabled",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Non-sensitive catalog item in one of the 10 store clothing and footwear categories.",
+      "type": "object",
+      "properties": {
+        "nameEn": { "type": "string", "description": "Product name in English." },
+        "nameHi": { "type": "string", "description": "Product name in Hindi." },
+        "category": {
+          "type": "string",
+          "enum": ["SAREES", "KURTIS", "LADIES_FROCKS", "SHIRTS", "TSHIRTS", "JEANS", "TROUSERS", "SHOES", "SANDALS", "SLIPPERS"],
+          "description": "Store product category."
+        },
+        "descriptionEn": { "type": "string", "description": "Product description in English." },
+        "descriptionHi": { "type": "string", "description": "Product description in Hindi." },
+        "sellingPriceInr": { "type": "integer", "description": "Selling price in INR." },
+        "originalPriceInr": { "type": "integer", "description": "Optional MRP / original price in INR (0 when not configured)." },
+        "stockCount": { "type": "integer", "description": "Available total stock units." },
+        "lowStockThreshold": { "type": "integer", "description": "Alert threshold for low stock." },
+        "sizes": { "type": "array", "description": "Available sizes (up to 15 options)." },
+        "colors": { "type": "array", "description": "Available colours (up to 15 options)." },
+        "variantNotes": { "type": "string", "description": "Optional variant structure note for future variant-level inventory." },
+        "sampleImageKey": { "type": "string", "description": "Bundled sample category artwork key." },
+        "imageUrl": { "type": "string", "description": "External HTTPS product photo URL if configured." },
+        "imageBase64": { "type": "string", "description": "Compressed JPEG base64 data from owner phone Photo Picker." },
+        "isPublished": { "type": "boolean", "description": "Whether visible to storefront shoppers." },
+        "isFeatured": { "type": "boolean", "description": "Whether highlighted in Featured section." },
+        "isDemo": { "type": "boolean", "description": "True if this is a demonstration sample item." },
+        "soldCount": { "type": "integer", "description": "Cumulative units sold across confirmed/placed store orders." },
+        "lastOrderId": { "type": "string", "description": "Reference to the latest atomic customer order deducting stock." },
+        "createdBy": { "type": "string", "description": "Owner UID who created the product." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "nameEn",
+        "category",
+        "sellingPriceInr",
+        "originalPriceInr",
+        "stockCount",
+        "lowStockThreshold",
+        "sizes",
+        "colors",
+        "isPublished",
+        "isFeatured",
+        "isDemo",
+        "soldCount",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProductCost": {
+      "title": "Product Cost",
+      "description": "Private owner-only purchase cost per product used strictly for accurate gross profit calculation.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "description": "Matching product document ID." },
+        "costPriceInr": { "type": "integer", "description": "Owner unit purchase cost in INR (0 if unrecorded)." },
+        "supplierNote": { "type": "string", "description": "Optional wholesale/supplier note." },
+        "updatedBy": { "type": "string", "description": "Owner UID." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["productId", "costPriceInr", "updatedBy", "updatedAt"]
+    },
+    "Order": {
+      "title": "Customer Order",
+      "description": "Customer online order with isolated PII, line-item price snapshots, payment state, and fulfilment lifecycle.",
+      "type": "object",
+      "properties": {
+        "orderReference": { "type": "string", "description": "Human-readable unique order reference (e.g., SSR-20261026-1234)." },
+        "customerId": { "type": "string", "description": "Authenticated customer UID." },
+        "customerName": { "type": "string", "description": "Recipient full name." },
+        "customerPhone": { "type": "string", "description": "10-digit Indian mobile number." },
+        "deliveryAddress": { "type": "string", "description": "Complete local delivery address." },
+        "landmark": { "type": "string", "description": "Optional landmark or delivery instructions." },
+        "items": { "type": "array", "description": "Bounded list of ordered item maps." },
+        "itemSummary": { "type": "string", "description": "Readable summary of items and quantities." },
+        "totalQuantity": { "type": "integer", "description": "Total units across all line items." },
+        "subtotalInr": { "type": "integer", "description": "Items subtotal in INR." },
+        "deliveryChargeInr": { "type": "integer", "description": "Delivery fee applied at checkout in INR." },
+        "discountInr": { "type": "integer", "description": "Owner-applied discount in INR." },
+        "totalPayableInr": { "type": "integer", "description": "Final payable amount in INR." },
+        "deliveryFeeConfirmed": { "type": "boolean", "description": "Whether store delivery policy was confirmed at order time." },
+        "paymentMethod": { "type": "string", "enum": ["COD", "UPI_QR"], "description": "Selected payment mode." },
+        "paymentStatus": { "type": "string", "enum": ["PENDING", "VERIFIED_PAID", "REFUNDED"], "description": "Owner-verified payment status." },
+        "orderStatus": {
+          "type": "string",
+          "enum": ["PENDING", "CONFIRMED", "PACKED", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"],
+          "description": "Order fulfilment status."
+        },
+        "stockDeducted": { "type": "boolean", "description": "True while stock is deducted for this order; false after restock." },
+        "cancellationReason": { "type": "string", "description": "Optional reason when cancelled." },
+        "invoiceNumber": { "type": "string", "description": "Generated invoice identifier." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "orderReference",
+        "customerId",
+        "customerName",
+        "customerPhone",
+        "deliveryAddress",
+        "items",
+        "itemSummary",
+        "totalQuantity",
+        "subtotalInr",
+        "deliveryChargeInr",
+        "discountInr",
+        "totalPayableInr",
+        "deliveryFeeConfirmed",
+        "paymentMethod",
+        "paymentStatus",
+        "orderStatus",
+        "stockDeducted",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OfflineSale": {
+      "title": "Offline Shop Sale",
+      "description": "Walk-in retail shop counter sale with unique invoice number recorded by the owner.",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": { "type": "string", "description": "Unique shop invoice number." },
+        "customerName": { "type": "string", "description": "Optional walk-in customer name." },
+        "customerPhone": { "type": "string", "description": "Optional walk-in customer mobile." },
+        "items": { "type": "array", "description": "Bounded list of sold item maps." },
+        "itemSummary": { "type": "string", "description": "Summary of sold items." },
+        "subtotalInr": { "type": "integer", "description": "Gross item subtotal in INR." },
+        "discountInr": { "type": "integer", "description": "Counter discount in INR." },
+        "totalPaidInr": { "type": "integer", "description": "Net amount collected in INR." },
+        "totalCostInr": { "type": "integer", "description": "Total purchase cost for cost-recorded items." },
+        "costCoveredRevenueInr": { "type": "integer", "description": "Portion of net revenue whose items had recorded purchase cost." },
+        "allCostsRecorded": { "type": "boolean", "description": "Whether every item in this bill had a recorded purchase cost." },
+        "paymentMethod": { "type": "string", "enum": ["CASH", "UPI", "CARD"], "description": "Counter payment method." },
+        "recordedBy": { "type": "string", "description": "Owner UID." },
+        "saleDateEpochDay": { "type": "integer", "description": "Local epoch day for date-range reporting." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "invoiceNumber",
+        "items",
+        "itemSummary",
+        "subtotalInr",
+        "discountInr",
+        "totalPaidInr",
+        "totalCostInr",
+        "costCoveredRevenueInr",
+        "allCostsRecorded",
+        "paymentMethod",
+        "recordedBy",
+        "saleDateEpochDay",
+        "createdAt"
+      ]
+    },
+    "Expense": {
+      "title": "Business Expense",
+      "description": "Owner-recorded shop operating or inventory expense.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Short expense description." },
+        "category": {
+          "type": "string",
+          "enum": ["STOCK_PURCHASE", "SHOP_RENT", "TRANSPORT", "ELECTRICITY_UTILITIES", "PACKAGING", "STAFF_HELPER", "OTHER"],
+          "description": "Expense category."
+        },
+        "amountInr": { "type": "integer", "description": "Expense amount in INR." },
+        "notes": { "type": "string", "description": "Optional notes or bill reference." },
+        "recordedBy": { "type": "string", "description": "Owner UID." },
+        "expenseDateEpochDay": { "type": "integer", "description": "Local epoch day for date-range reporting." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": ["title", "category", "amountInr", "recordedBy", "expenseDateEpochDay", "createdAt"]
+    },
+    "InventoryMovement": {
+      "title": "Inventory Movement",
+      "description": "Immutable stock change audit record for online orders, cancellations, offline sales, and manual adjustments.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "description": "Target product ID." },
+        "productName": { "type": "string", "description": "Target product name." },
+        "previousStock": { "type": "integer", "description": "Stock before movement." },
+        "newStock": { "type": "integer", "description": "Stock after movement." },
+        "delta": { "type": "integer", "description": "Signed quantity change." },
+        "reason": {
+          "type": "string",
+          "enum": ["INITIAL_STOCK", "MANUAL_UPDATE", "ONLINE_ORDER", "ORDER_CANCELLED_RESTOCK", "OFFLINE_SALE"],
+          "description": "Reason for stock movement."
+        },
+        "referenceId": { "type": "string", "description": "Related order ID, sale ID, or product ID." },
+        "actorId": { "type": "string", "description": "Authenticated UID performing the action." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "productId",
+        "productName",
+        "previousStock",
+        "newStock",
+        "delta",
+        "reason",
+        "referenceId",
+        "actorId",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "AdminRecord",
+      "description": "Owner administrator lookup documents."
+    },
+    "/store_settings/{configId}": {
+      "schema": "StoreSettings",
+      "description": "Public storefront settings document (public_config)."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Storefront and admin product catalog."
+    },
+    "/product_costs/{productId}": {
+      "schema": "ProductCost",
+      "description": "Owner-only product purchase cost records."
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer online orders isolated per customerId."
+    },
+    "/offline_sales/{saleId}": {
+      "schema": "OfflineSale",
+      "description": "Owner-only walk-in counter sales and invoices."
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Owner-only business expense ledger."
+    },
+    "/inventory_movements/{movementId}": {
+      "schema": "InventoryMovement",
+      "description": "Append-only stock movement audit trail."
+    }
+  }
+}
